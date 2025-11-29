@@ -1,0 +1,38 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16
+    container_name: ai-med-transcription-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: meduser
+      POSTGRES_PASSWORD: medpass
+      POSTGRES_DB: med_transcription
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    image: python:3.11-slim
+    container_name: ai-med-transcription-backend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./:/app
+    environment:
+      # Point backend at the Postgres service in this compose file
+      DATABASE_URL: "postgresql+psycopg2://meduser:medpass@db:5432/med_transcription"
+      USE_SQL_REPOS: "true"
+      ENABLE_API_AUTH: "false"  # set to "true" and configure API_KEYS for shared/staging envs
+      AUDIO_UPLOAD_DIR: "/app/uploads"
+      CORS_ALLOW_ORIGINS: "*"
+    depends_on:
+      - db
+    command: ["sh", "-c", "pip install -r requirements.txt && uvicorn src.backend.main:app --host 0.0.0.0 --port 8000"]
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:
