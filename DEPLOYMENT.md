@@ -48,9 +48,11 @@ It focuses on the FastAPI backend and the React frontend in `src/frontend/web`.
 Key settings:
 
 - **ASR / NLP**
-  - `ASR_BACKEND` – e.g. `"demo"`, `"whisper"`, or `"llama"` (stub for offline/on-device LLaMA-style models).
+  - `ASR_BACKEND` – e.g. `"demo"`, `"whisper"`, `"llama"` (stub for offline/on-device LLaMA-style models), or `"multi_accent"` (accent-aware wrapper around the default backend).
   - `TRANSLATION_BACKEND` – e.g. `"demo"` or `"llm"`.
   - `NLP_NER_BACKEND`, `NLP_CODING_BACKEND`, `NLP_SOAP_BACKEND` – currently `"demo"`.
+  - `ALLOW_CLOUD_LLM` – `"true"` (default) to permit LLM-based translation when `TRANSLATION_BACKEND=llm`; set to `"false"` to hard-disable cloud LLM usage even if `OPENAI_API_KEY` is set.
+  - `REQUIRE_ON_PREM_ONLY` – `"true"` to signal that deployments must avoid external SaaS/cloud dependencies where possible; enforcement is implemented in individual backends and should be combined with infra controls.
 
 - **Audio storage**
   - `AUDIO_UPLOAD_DIR` – directory for uploaded audio (default: `uploads`).
@@ -76,6 +78,15 @@ Key settings:
   - `DATABASE_URL` – SQLAlchemy database URL. For Postgres (recommended beyond local dev):
     - `postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME`
   - `USE_SQL_REPOS` – `"true"` to enable SQL‑backed repositories for encounters, notes, and jobs; otherwise in‑memory.
+
+- **Optional MultiChain (private blockchain) audit logging**
+  - `MULTICHAIN_ENABLED` – `"true"` to enable mirroring of audit events into a MultiChain stream.
+  - `MULTICHAIN_RPC_SCHEME` – `"http"` or `"https"` for the JSON-RPC endpoint (default `"http"`).
+  - `MULTICHAIN_RPC_HOST` – host of the MultiChain RPC node (e.g. `"multichain"` in Docker, or an external hostname).
+  - `MULTICHAIN_RPC_PORT` – RPC port (default `6824`).
+  - `MULTICHAIN_RPC_USER` / `MULTICHAIN_RPC_PASSWORD` – RPC basic auth credentials.
+  - `MULTICHAIN_CHAIN_NAME` – logical chain name (informational in the app, but should match your node config).
+  - `MULTICHAIN_AUDIT_STREAM` – name of the MultiChain stream used for audit events (default `"audit"`).
 
 ### Frontend (`src/frontend/web`)
 
@@ -227,6 +238,8 @@ Staging should mirror pilot as closely as possible, but use only synthetic or de
        - Connects to `DATABASE_URL`.
        - Calls `Base.metadata.create_all(engine)` for `encounters`, `clinical_notes`, `transcription_jobs`.
        - Swaps repository singletons to their SQL implementations.
+   - If `MULTICHAIN_ENABLED=true` and the RPC variables are set, audit events
+     will also be mirrored into the configured MultiChain stream.
 
 4. **ASR / NLP backends**
 
@@ -417,8 +430,9 @@ Before going live with real PHI:
 - [ ] **Monitoring & audit**
   - Error logs being collected (no raw transcripts or notes in log messages).
   - Basic metrics (requests, errors) available.
-  - Alerts for major failures (e.g. DB down, ASR failures) configured.
+  - Alerts for major failures (e.g. DB down, ASR failures, MultiChain RPC failures) configured.
   - Audit logs recording upload, live transcription, analysis, and export events with IDs and timestamps.
+  - If MultiChain is enabled, `/api/v1/system/blockchain/health` is returning `{"status": "ok"}`.
 
 - [ ] **Frontend**
   - Correct `VITE_API_BASE_URL` for pilot.

@@ -28,11 +28,42 @@ services:
       ENABLE_API_AUTH: "false"  # set to "true" and configure API_KEYS for shared/staging envs
       AUDIO_UPLOAD_DIR: "/app/uploads"
       CORS_ALLOW_ORIGINS: "*"
+      # ASR / NLP configuration
+      ASR_BACKEND: "demo"           # set to "multi_accent" to enable accent-aware wrapper
+      TRANSLATION_BACKEND: "demo"   # set to "llm" to use LLMTranslationBackend (see ALLOW_CLOUD_LLM)
+      # Sovereignty / cloud controls
+      REQUIRE_ON_PREM_ONLY: "false"  # set to "true" in strictly on-prem Indigenous/clinic deployments
+      ALLOW_CLOUD_LLM: "true"       # set to "false" to disable any cloud LLM translation usage
+      # Optional MultiChain (private blockchain) integration for tamper-evident audit logs.
+      # By default this is disabled. To enable, set MULTICHAIN_ENABLED="true" and
+      # point the RPC host/user/password at a running MultiChain node (which may
+      # run inside or outside this compose file).
+      MULTICHAIN_ENABLED: "false"
+      MULTICHAIN_RPC_SCHEME: "http"
+      MULTICHAIN_RPC_HOST: "multichain"  # or external host if running MultiChain elsewhere
+      MULTICHAIN_RPC_PORT: "6824"
+      MULTICHAIN_RPC_USER: "multichainrpc"
+      MULTICHAIN_RPC_PASSWORD: "multichainrpcpassword"
+      MULTICHAIN_CHAIN_NAME: "clinic-chain"
+      MULTICHAIN_AUDIT_STREAM: "audit"
     depends_on:
       - db
     command: ["sh", "-c", "pip install -r requirements.txt && uvicorn src.backend.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
 
+  # Optional MultiChain node for local development. You must replace the image
+  # and configuration with the MultiChain container you are actually using.
+  # The backend is configured above to talk to this service via host "multichain".
+  multichain:
+    image: multichain/multichain  # TODO: replace with the official/community image you use
+    container_name: ai-med-transcription-multichain
+    restart: unless-stopped
+    ports:
+      - "6824:6824"  # JSON-RPC
+    volumes:
+      - multichain-data:/root/.multichain
+
 volumes:
   pgdata:
+  multichain-data:

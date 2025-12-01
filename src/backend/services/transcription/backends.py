@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional, Protocol
 
 from src.backend.config import settings
+from src.backend.core.multi_accent_asr_backend import MultiAccentASRBackend
 
 
 class ASRBackend(Protocol):
@@ -125,6 +126,9 @@ class LLMTranslationBackend(TranslationBackend):
         target_language: str,
         source_language: Optional[str] = None,
     ) -> str:  # pragma: no cover - depends on external service
+        if not settings.allow_cloud_llm:
+            raise RuntimeError("Cloud LLM translation is disabled (ALLOW_CLOUD_LLM=false)")
+
         api_key = settings.openai_api_key
         if not api_key:
             raise RuntimeError("OPENAI_API_KEY must be set to use LLMTranslationBackend")
@@ -167,6 +171,7 @@ def get_asr_backend_from_env() -> ASRBackend:
 
     - ASR_BACKEND=whisper → WhisperASRBackend
     - ASR_BACKEND=llama → LlamaASRBackend (stub for local/offline models)
+    - ASR_BACKEND=multi_accent → MultiAccentASRBackend wrapping the default backend
     - Anything else (or unset) → DemoASRBackend
     """
 
@@ -175,6 +180,10 @@ def get_asr_backend_from_env() -> ASRBackend:
         return WhisperASRBackend()
     if backend_name == "llama":
         return LlamaASRBackend()
+    if backend_name == "multi_accent":
+        # Wrap the demo backend by default; this can later be changed to wrap
+        # Whisper or a tenant-specific backend without affecting callers.
+        return MultiAccentASRBackend(base_backend=demo_asr_backend)
     return demo_asr_backend
 
 

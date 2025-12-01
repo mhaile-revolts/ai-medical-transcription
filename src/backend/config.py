@@ -18,6 +18,24 @@ class Settings:
     # ASR backend selection: "demo" (default) or "whisper".
     asr_backend: str = os.getenv("ASR_BACKEND", "demo")
 
+    # Optional MultiChain (private blockchain) integration used for tamper-evident
+    # audit logging. When MULTICHAIN_ENABLED=true and the RPC connection details
+    # are valid, structured audit events will be mirrored into a configured
+    # MultiChain stream. PHI is never written on-chain; only minimal metadata
+    # such as resource IDs and action types should be published.
+    multichain_enabled: bool = os.getenv("MULTICHAIN_ENABLED", "false").lower() == "true"
+    multichain_rpc_scheme: str = os.getenv("MULTICHAIN_RPC_SCHEME", "http")
+    multichain_rpc_host: str = os.getenv("MULTICHAIN_RPC_HOST", "127.0.0.1")
+    multichain_rpc_port: int = int(os.getenv("MULTICHAIN_RPC_PORT", "6824"))
+    multichain_rpc_user: Optional[str] = os.getenv("MULTICHAIN_RPC_USER")
+    multichain_rpc_password: Optional[str] = os.getenv("MULTICHAIN_RPC_PASSWORD")
+    multichain_chain_name: Optional[str] = os.getenv("MULTICHAIN_CHAIN_NAME")
+    multichain_audit_stream: str = os.getenv("MULTICHAIN_AUDIT_STREAM", "audit")
+    multichain_rpc_timeout_seconds: float = float(os.getenv("MULTICHAIN_RPC_TIMEOUT_SECONDS", "2.0"))
+
+    # ASR backend selection: "demo" (default) or "whisper".
+    asr_backend: str = os.getenv("ASR_BACKEND", "demo")
+
     # Translation backend selection: "demo" (default) or "llm".
     translation_backend: str = os.getenv("TRANSLATION_BACKEND", "demo")
 
@@ -40,6 +58,15 @@ class Settings:
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     whisper_model_name: str = os.getenv("WHISPER_MODEL_NAME", "base")
     llm_model: str = os.getenv("LLM_MODEL", "gpt-4.1-mini")
+
+    # Deployment/sovereignty controls.
+    # When REQUIRE_ON_PREM_ONLY=true, operators intend the system to avoid
+    # relying on external SaaS/cloud dependencies. Enforcement is implemented
+    # in the relevant backends (e.g., LLMTranslationBackend, future cloud ASR).
+    require_on_prem_only: bool = os.getenv("REQUIRE_ON_PREM_ONLY", "false").lower() == "true"
+    # When ALLOW_CLOUD_LLM=false, LLMTranslationBackend is disabled even if an
+    # OPENAI_API_KEY is present.
+    allow_cloud_llm: bool = os.getenv("ALLOW_CLOUD_LLM", "true").lower() == "true"
 
     # Optional model identifiers for NLP backends.
     # Med7 spaCy pipeline name used when NLP_NER_BACKEND=med7.

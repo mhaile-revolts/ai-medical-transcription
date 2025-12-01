@@ -12,6 +12,7 @@ from src.backend.api.v1.routes_templates import router as templates_router_v1
 from src.backend.api.v1.routes_patients import router as patients_router_v1
 from src.backend.api.v1.routes_analytics import router as analytics_router_v1
 from src.backend.api.v1.routes_scribe import router as scribe_router_v1
+from src.backend.api.v1.routes_culture import router as culture_router_v1
 from src.backend.config import settings
 from src.backend.infra.db.bootstrap import init_sql_repositories
 
@@ -60,3 +61,4 @@ app.include_router(templates_router_v1, prefix="/api/v1")
 app.include_router(patients_router_v1, prefix="/api/v1")
 app.include_router(analytics_router_v1, prefix="/api/v1")
 app.include_router(scribe_router_v1, prefix="/api/v1")
+app.include_router(culture_router_v1, prefix="/api/v1")

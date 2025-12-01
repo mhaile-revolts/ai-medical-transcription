@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import Any, List, Mapping, Optional
 
 from src.backend.domain.nlp.decision_support import (
     DecisionSupportSuggestion,
@@ -8,6 +8,10 @@ from src.backend.domain.nlp.decision_support import (
     SuggestionType,
 )
 from src.backend.domain.nlp.models import ClinicalEntities, SOAPNote
+from src.backend.services.nlp.bias_auditor import bias_auditor
+from src.backend.services.nlp.cultural_risk_engine import cultural_risk_engine
+from src.backend.services.nlp.indigenous_risk_engine import indigenous_risk_engine
+from src.backend.services.nlp.cultural_safety_guard import cultural_safety_guard
 
 
 class DecisionSupportService:
@@ -17,7 +21,13 @@ class DecisionSupportService:
     LLM+RAG implementation. It should always be treated as advisory only.
     """
 
-    def suggest(self, entities: ClinicalEntities, soap_note: SOAPNote | None = None) -> List[DecisionSupportSuggestion]:
+    def suggest(
+        self,
+        entities: ClinicalEntities,
+        soap_note: SOAPNote | None = None,
+        *,
+        patient_metadata: Mapping[str, Any] | None = None,
+    ) -> List[DecisionSupportSuggestion]:
         suggestions: List[DecisionSupportSuggestion] = []
 
         has_diabetes_dx = any("diabetes" in (e.text or "").lower() for e in entities.diagnoses)
@@ -57,6 +67,23 @@ class DecisionSupportService:
                     summary="Diabetes on treatment – consider labs and monitoring.",
                     details="Ensure recent HbA1c, renal function, and follow-up plan are documented.",
                     evidence_refs=["demo-guideline-diabetes-3"],
+                )
+            )
+
+        # Culture- and context-aware risk engines (advisory only for now).
+        if soap_note is not None:
+            suggestions.extend(
+                cultural_risk_engine.assess(
+                    entities,
+                    soap_note,
+                    patient_metadata=patient_metadata,
+                )
+            )
+            suggestions.extend(
+                indigenous_risk_engine.assess(
+                    entities,
+                    soap_note,
+                    patient_metadata=patient_metadata,
                 )
             )
 
@@ -103,6 +130,16 @@ class DecisionSupportService:
                         evidence_refs=["demo-guideline-psych-1"],
                     )
                 )
+
+        # Run lightweight bias audit for observability (non-blocking).
+        try:
+            bias_auditor.audit_suggestions(suggestions)
+        except Exception:
+            # Bias auditing is advisory only; never break CDS on failure.
+            pass
+
+        # Apply conservative cultural safety guard as a last step.
+        suggestions = cultural_safety_guard.review(suggestions, soap_note=soap_note)
 
         return suggestions
 

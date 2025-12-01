@@ -11,6 +11,7 @@ from src.backend.domain.models.clinical_encounter import ClinicalEncounter, Enco
 from src.backend.domain.models.clinical_note import ClinicalNote
 from src.backend.domain.models.user import User
 from src.backend.domain.nlp.decision_support import DecisionSupportSuggestion
+from src.backend.domain.models.patient_metadata import PatientMetadata
 from src.backend.services.transcription.service import transcription_service
 from src.backend.services.audit.service import audit_service
 from src.backend.services.nlp.service import nlp_service
@@ -57,6 +58,11 @@ class EncounterNoteUpdateRequest(BaseModel):
     assessment: str
     plan: str
     finalize: bool = False
+
+
+class EncounterDecisionSupportRequest(BaseModel):
+    # Optional self-reported patient metadata for culture-aware NLP/CDS.
+    patient_metadata: PatientMetadata | None = None
 
 
 class EncounterDecisionSupportResponse(BaseModel):
@@ -274,6 +280,7 @@ async def finalize_encounter(
 @router.post("/{encounter_id}/decision-support", response_model=EncounterDecisionSupportResponse)
 async def encounter_decision_support(
     encounter_id: UUID,
+    payload: EncounterDecisionSupportRequest | None = None,
     current_user: User = Depends(get_current_user),
 ) -> EncounterDecisionSupportResponse:
     """Generate advisory decision-support suggestions for an encounter.
@@ -301,8 +308,18 @@ async def encounter_decision_support(
         )
 
     combined = "\n\n".join(texts)
-    entities, soap = nlp_service.extract_and_summarize(combined)
-    suggestions = decision_support_service.suggest(entities, soap)
+    patient_metadata = (
+        payload.patient_metadata.model_dump() if payload and payload.patient_metadata else None
+    )
+    entities, soap = nlp_service.extract_and_summarize(
+        combined,
+        patient_metadata=patient_metadata,
+    )
+    suggestions = decision_support_service.suggest(
+        entities,
+        soap,
+        patient_metadata=patient_metadata,
+    )
 
     audit_service.log_event(
         action="encounter_decision_support",

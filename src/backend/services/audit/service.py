@@ -6,6 +6,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
+from src.backend.config import settings
 
 logger = logging.getLogger("audit")
 
@@ -66,14 +67,31 @@ class AuditService:
             subject=subject,
             extra=extra,
         )
+
+        # Always log to the local structured logger first.
         try:
-            logger.info(json.dumps(asdict(event)))
+            payload = asdict(event)
+            logger.info(json.dumps(payload))
         except TypeError:
             # Fallback: log a simpler representation if something in extra is
             # not JSON serializable.
             safe_event = asdict(event)
             safe_event["extra"] = None
+            payload = safe_event
             logger.info(json.dumps(safe_event))
+
+        # Optionally mirror the audit event into a MultiChain stream when
+        # enabled. Any failures here are non-fatal and only logged, so audit
+        # logging never breaks the main request flow.
+        if settings.multichain_enabled:
+            try:
+                from src.backend.services.blockchain.multichain import get_multichain_client
+
+                client = get_multichain_client()
+                if client is not None:
+                    client.publish_audit_event(payload)
+            except Exception:
+                logger.exception("Failed to publish audit event to MultiChain")
 
 
 audit_service = AuditService()

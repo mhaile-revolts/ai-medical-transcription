@@ -17,7 +17,7 @@ Key capabilities:
 - Advisory clinical decision support (rule-based demo)
 - FHIR export
 - Multitenant, Postgres‑backed persistence
-- API key–based auth, audit logging
+- API key–based auth, audit logging with optional MultiChain mirroring for tamper-evident trails (no PHI on-chain)
 - Web SPA + mobile apps
 
 ---
@@ -29,7 +29,7 @@ Key capabilities:
 - **Backend API**: FastAPI (`src/backend/main.py`)
   - Versioned API under `/api/v1`
   - Routers:
-    - System: `/api/v1/health`, etc.
+    - System: `/api/v1/health`, `/api/v1/system/blockchain/health` (MultiChain health)
     - Transcriptions: `/api/v1/transcriptions`, `/transcriptions/async`
     - Audio ingestion: `/api/v1/audio/...` (upload + WebSocket)
     - NLP & export: transcription analysis, FHIR export
@@ -55,6 +55,34 @@ Key capabilities:
   - `services/users`: subject→User mapping
   - `services/audit`: structured audit logging
   - `services/templates`: in-memory note templates per tenant
+
+### 2.2 Cultural, Accent, and Sovereignty-aware components
+
+In addition to the core services above, the backend includes a set of components
+focused on cultural safety, Indigenous data sovereignty, and accent-aware ASR:
+
+- `services/nlp/cultural_phrase_normalizer.py` and
+  `services/nlp/indigenous_phrase_normalizer.py` – map culturally specific
+  expressions (e.g., "my blood is hot") into parallel clinical wording for the
+  NLP pipeline while preserving original phrases for clinicians.
+- `services/governance/indigenous_data_sovereignty_guard.py` – evaluates
+  patient/tenant consent flags (e.g., consent for cultural AI features and
+  training reuse) and produces a `CulturalConsentContext` used by NLP/ML
+  backends.
+- `services/nlp/cultural_risk_engine.py` and
+  `services/nlp/indigenous_risk_engine.py` – optional, conservative engines that
+  add advisory risk hints for specific regions/communities when explicit
+  metadata is provided (never based on inferred race/ethnicity).
+- `services/nlp/bias_auditor.py` – logs aggregate CDS suggestion patterns for
+  later bias analysis without changing clinical output.
+- `services/nlp/cultural_safety_guard.py` – post-processes CDS suggestions to
+  add cultural-safety advisories in edge cases (e.g., spiritual language plus
+  high-severity alerts).
+- `core/accent_classifier.py` – heuristic `AccentLabel` classifier based on
+  language codes and optional region hints.
+- `core/multi_accent_asr_backend.py` – wrapper ASR backend that classifies
+  accent before delegating to the configured ASR implementation; currently used
+  for observability and future accent-specific tuning.
 - **Persistence layer**:
   - In‑memory services for early prototyping
   - Pluggable repositories:
