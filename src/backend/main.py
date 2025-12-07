@@ -20,7 +20,12 @@ app = FastAPI(title="AI Medical Transcription Detector API")
 
 
 @app.on_event("startup")
-async def on_startup() -> None:
+async def startup_event():
+    pass # Replace with actual lifespan context manager later
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    pass # Add shutdown logic if needed
     """Application startup hook.
 
     When USE_SQL_REPOS is enabled and a DATABASE_URL is configured, this will

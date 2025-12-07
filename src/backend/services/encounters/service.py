@@ -32,7 +32,7 @@ class InMemoryEncounterService:
         encounter_id = uuid4()
         encounter = ClinicalEncounter(
             id=encounter_id,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             clinician_id=clinician_id,
             patient_id=patient_id,
             title=title,
@@ -90,7 +90,7 @@ class InMemoryEncounterService:
         editor_id: Optional[str] = None,
         finalize: bool = False,
     ) -> ClinicalNote:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         existing = self._find_note_for_encounter(encounter_id)
         if existing is None:
