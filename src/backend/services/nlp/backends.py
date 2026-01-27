@@ -61,6 +61,8 @@ class DemoCodingBackend:
         for diag in entities.diagnoses:
             if diag.text.lower() == "diabetes" and not diag.code:
                 diag.code = "E11"
+                diag.code_system = "ICD10"
+                diag.code_display = "Type 2 diabetes mellitus (demo)"
         return entities
 
 
@@ -148,6 +150,29 @@ class UmlsCodingBackend:
             return None
         return best
 
+    def debug_best_match(self, text: str) -> tuple[Optional[Dict[str, Any]], float]:
+        """Return the best-matching concept and raw similarity score for text.
+
+        This is intended for admin/debug tooling so operators can introspect how
+        the terminology concepts file is being used for matching.
+        """
+
+        self._load_concepts()
+        assert self._concepts is not None
+
+        best: Optional[Dict[str, Any]] = None
+        best_score = 0.0
+        source = text.lower()
+        for concept in self._concepts:
+            name = concept.get("name")
+            if not isinstance(name, str):
+                continue
+            score = SequenceMatcher(a=source, b=name.lower()).ratio()
+            if score > best_score:
+                best_score = score
+                best = concept
+        return best, best_score
+
     def code(self, entities: ClinicalEntities) -> ClinicalEntities:
         self._load_concepts()
         assert self._concepts is not None
@@ -162,6 +187,12 @@ class UmlsCodingBackend:
                 code = match.get("code")
                 if isinstance(code, str):
                     ent.code = code
+                system = match.get("system")
+                if isinstance(system, str):
+                    ent.code_system = system
+                name = match.get("name")
+                if isinstance(name, str):
+                    ent.code_display = name
         return entities
 
 
@@ -224,6 +255,8 @@ class ClinicalBERTNERBackend:
             span_text = str(item.get("word") or item.get("text") or "")
             if not span_text:
                 continue
+            score = item.get("score")
+            confidence: Optional[float] = float(score) if isinstance(score, (int, float)) else None
 
             target_bucket = None
             if any(tok in label for tok in ("DISEASE", "DISORDER", "PROBLEM", "COND", "DIAG")):
@@ -234,7 +267,13 @@ class ClinicalBERTNERBackend:
                 target_bucket = entities.medications
 
             if target_bucket is not None:
-                target_bucket.append(ClinicalEntity(label=label, text=span_text))
+                target_bucket.append(
+                    ClinicalEntity(
+                        label=label,
+                        text=span_text,
+                        confidence=confidence,
+                    )
+                )
 
         return entities
 

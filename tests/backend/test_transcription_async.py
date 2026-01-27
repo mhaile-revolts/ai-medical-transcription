@@ -1,14 +1,17 @@
 from uuid import UUID
 
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from fastapi import status
+import pytest
 
 from src.backend.domain.models.transcription_job import TranscriptJobStatus
 from src.backend.main import app
 
+pytestmark = pytest.mark.asyncio
+
 
 async def test_create_transcription_job_async_and_poll_until_completed():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         create_response = await ac.post(
             "/api/v1/transcriptions/async",
             json={

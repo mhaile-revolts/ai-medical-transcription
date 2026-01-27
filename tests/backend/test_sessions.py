@@ -1,11 +1,14 @@
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from fastapi import status
+import pytest
 
 from src.backend.main import app
 
+pytestmark = pytest.mark.asyncio
+
 
 async def test_create_session_attach_transcription_and_analyze():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # Create a session
         create_session_resp = await ac.post(
             "/api/v1/sessions/",

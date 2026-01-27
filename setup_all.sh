@@ -166,12 +166,15 @@ start_docker_stack() {
     return 0
   fi
 
+  # Only start the core services we need for local dev (db + backend).
+  # This intentionally avoids bringing up the optional multichain service,
+  # which may reference a placeholder image.
   if have_cmd docker-compose; then
-    log "Starting Docker stack with docker-compose up -d..."
-    docker-compose up -d
+    log "Starting Docker stack (db + backend) with docker-compose up -d..."
+    docker-compose up -d db backend
   elif have_cmd docker; then
-    log "Starting Docker stack with docker compose up -d..."
-    docker compose up -d
+    log "Starting Docker stack (db + backend) with docker compose up -d..."
+    docker compose up -d db backend
   else
     warn "Docker not available; cannot start DB/backend containers."
   fi

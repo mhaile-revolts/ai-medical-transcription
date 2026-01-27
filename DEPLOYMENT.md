@@ -50,7 +50,12 @@ Key settings:
 - **ASR / NLP**
   - `ASR_BACKEND` – e.g. `"demo"`, `"whisper"`, `"llama"` (stub for offline/on-device LLaMA-style models), or `"multi_accent"` (accent-aware wrapper around the default backend).
   - `TRANSLATION_BACKEND` – e.g. `"demo"` or `"llm"`.
-  - `NLP_NER_BACKEND`, `NLP_CODING_BACKEND`, `NLP_SOAP_BACKEND` – currently `"demo"`.
+  - `NLP_NER_BACKEND`, `NLP_CODING_BACKEND`, `NLP_SOAP_BACKEND` – core NLP pipeline knobs:
+    - `NLP_NER_BACKEND` – `"demo"` (default), `"med7"`, or `"clinicalbert"`.
+    - `NLP_CODING_BACKEND` – `"demo"` (default) or `"umlscoder"` / `"umls"` for ontology-based terminology mapping.
+    - `NLP_SOAP_BACKEND` – `"demo"` (default) or `"llm"` for LLM-generated SOAP notes.
+  - `UMLS_CONCEPTS_PATH` – absolute or relative path to a JSON or JSONL file containing concept records with at least a `"name"` field and optionally `"code"` and `"system"` (used by `umlscoder`).
+  - `UMLS_MIN_SIMILARITY` – minimum string similarity (0–1, default `0.85`) required to assign a code when using `umlscoder`.
   - `ALLOW_CLOUD_LLM` – `"true"` (default) to permit LLM-based translation when `TRANSLATION_BACKEND=llm`; set to `"false"` to hard-disable cloud LLM usage even if `OPENAI_API_KEY` is set.
   - `REQUIRE_ON_PREM_ONLY` – `"true"` to signal that deployments must avoid external SaaS/cloud dependencies where possible; enforcement is implemented in individual backends and should be combined with infra controls.
 

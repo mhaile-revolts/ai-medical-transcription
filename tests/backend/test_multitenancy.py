@@ -1,7 +1,10 @@
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from fastapi import status
+import pytest
 
 from src.backend.main import app
+
+pytestmark = pytest.mark.asyncio
 
 
 async def test_multitenancy_isolation_for_encounters_and_transcriptions():
@@ -11,7 +14,7 @@ async def test_multitenancy_isolation_for_encounters_and_transcriptions():
     different X-Tenant-ID headers.
     """
 
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # Tenant A: create an encounter via API
         create_enc_a = await ac.post(
             "/api/v1/encounters/",

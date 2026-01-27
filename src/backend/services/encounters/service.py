@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 from uuid import UUID, uuid4
 
@@ -90,9 +90,23 @@ class InMemoryEncounterService:
         editor_id: Optional[str] = None,
         finalize: bool = False,
     ) -> ClinicalNote:
+        """Create or update a clinical note from a SOAP structure.
+
+        When a note has already been finalized via the review/finalization
+        workflow, this helper will **not** overwrite it unless `Finalize` is
+        explicitly requested. This protects clinician-reviewed notes from being
+        clobbered by later NLP re-analysis of the same encounter.
+        """
+
         now = datetime.now(timezone.utc)
 
         existing = self._find_note_for_encounter(encounter_id)
+        if existing is not None and existing.is_finalized and not finalize:
+            # Do not overwrite finalized notes when called in auto-update mode
+            # (e.g., from transcription analysis). The dedicated finalize endpoint
+            # should be used to change finalized notes.
+            return existing
+
         if existing is None:
             note_id = uuid4()
             note = ClinicalNote(

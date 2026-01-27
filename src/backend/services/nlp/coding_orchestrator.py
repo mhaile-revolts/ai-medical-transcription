@@ -30,9 +30,18 @@ class CodingOrchestrator:
             for ent in bucket:
                 if not ent.text:
                     continue
-                # Try to guess coding system from the code pattern; fall back to OTHER.
+                # Prefer explicit entity-level code_system when available; fall
+                # back to guessing from the code pattern.
                 system = CodeSystem.OTHER
-                if ent.code:
+                if getattr(ent, "code_system", None):
+                    norm = ent.code_system.upper()
+                    if "ICD" in norm:
+                        system = CodeSystem.ICD10
+                    elif "SNOMED" in norm:
+                        system = CodeSystem.SNOMED
+                    elif "CPT" in norm:
+                        system = CodeSystem.CPT
+                elif ent.code:
                     if ent.code[0].isalpha() and any(c.isdigit() for c in ent.code):
                         system = CodeSystem.ICD10
                 assignments.append(
@@ -42,7 +51,7 @@ class CodingOrchestrator:
                         display=None,
                         source_entity_label=ent.label,
                         source_text=ent.text,
-                        confidence=None,
+                        confidence=getattr(ent, "confidence", None),
                         category=category,
                     )
                 )

@@ -1,0 +1,10 @@
+{
+  "name": "ai-medical-transcription",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AI/ML-powered medical transcription and analysis platform (root workspace)",
+  "scripts": {
+    "test": "echo \"No JS tests defined\" && exit 0",
+    "lint": "echo \"No JS lint config defined\" && exit 0"
+  }
+}

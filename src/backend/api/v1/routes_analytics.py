@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from src.backend.domain.models.analytics import ClinicOverviewMetrics, ClinicianSummaryMetrics
+from src.backend.domain.models.analytics import (
+    ClinicOverviewMetrics,
+    ClinicianSummaryMetrics,
+    PilotSummaryMetrics,
+)
 from src.backend.security import get_api_key, get_current_user
 from src.backend.tenancy import tenant_dependency
 from src.backend.services.analytics.service import analytics_service
@@ -29,3 +33,14 @@ async def clinician_summary(
 ) -> ClinicianSummaryMetrics:
     target_id = clinician_id or str(current_user.id)
     return analytics_service.compute_clinician_summary(target_id)
+
+
+@router.get("/pilot-summary", response_model=PilotSummaryMetrics)
+async def pilot_summary(current_user: User = Depends(get_current_user)) -> PilotSummaryMetrics:
+    """Return lightweight metrics helpful for evaluating the clinic pilot.
+
+    This endpoint is intended for internal dashboards and remains auth- and
+    tenant-protected.
+    """
+
+    return analytics_service.compute_pilot_summary()

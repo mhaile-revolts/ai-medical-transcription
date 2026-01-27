@@ -13,7 +13,10 @@
     },
     "ios": {
       "bundleIdentifier": "com.motorchain.aimedicaltranscription",
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.motorchain.aimedicaltranscription",
@@ -24,6 +27,11 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "efdcfaf7-9884-44da-9378-36ebf68429a3"
+      }
     }
   }
 }

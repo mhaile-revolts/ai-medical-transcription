@@ -1,5 +1,12 @@
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+# Load root-level .env so Settings() picks up values without needing shell exports.
+# The project root is two levels up from this file: src/backend/main.py -> backend -> src -> root.
+load_dotenv(dotenv_path=Path(__file__).resolve().parents[2] / ".env", override=False)
 
 from src.backend.api.v1.routes_system import router as system_router_v1
 from src.backend.api.v1.routes_transcription import router as transcription_router_v1
@@ -13,6 +20,7 @@ from src.backend.api.v1.routes_patients import router as patients_router_v1
 from src.backend.api.v1.routes_analytics import router as analytics_router_v1
 from src.backend.api.v1.routes_scribe import router as scribe_router_v1
 from src.backend.api.v1.routes_culture import router as culture_router_v1
+from src.backend.api.v1.routes_ehr import router as ehr_router_v1
 from src.backend.config import settings
 from src.backend.infra.db.bootstrap import init_sql_repositories
 
@@ -21,11 +29,6 @@ app = FastAPI(title="AI Medical Transcription Detector API")
 
 @app.on_event("startup")
 async def startup_event():
-    pass # Replace with actual lifespan context manager later
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    pass # Add shutdown logic if needed
     """Application startup hook.
 
     When USE_SQL_REPOS is enabled and a DATABASE_URL is configured, this will
@@ -34,7 +37,17 @@ async def shutdown_event():
     database), this is a no-op and the in-memory repositories remain active.
     """
 
-    init_sql_repositories()
+    if settings.use_sql_repos and settings.database_url:
+        init_sql_repositories()
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Application shutdown hook.
+
+    Add graceful shutdown logic here if needed (e.g., closing DB connections).
+    """
+    pass
 
 # CORS configuration – permissive by default for development. Tighten via
 # CORS_ALLOW_ORIGINS in production deployments.
@@ -67,3 +80,4 @@ app.include_router(patients_router_v1, prefix="/api/v1")
 app.include_router(analytics_router_v1, prefix="/api/v1")
 app.include_router(scribe_router_v1, prefix="/api/v1")
 app.include_router(culture_router_v1, prefix="/api/v1")
+app.include_router(ehr_router_v1, prefix="/api/v1")

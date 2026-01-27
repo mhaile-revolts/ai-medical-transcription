@@ -4,6 +4,7 @@ from typing import Any, Dict
 from uuid import UUID
 
 from src.backend.domain.nlp.models import ClinicalEntities, SOAPNote
+from src.backend.services.ehr import fhir_mapper
 
 
 class DemoFHIRExporter:
@@ -14,6 +15,16 @@ class DemoFHIRExporter:
     note and key entities so downstream integration can be tested.
     """
 
+    def _build_coding(
+        self,
+        code: str | None,
+        system_hint: str | None = None,
+        display: str | None = None,
+    ) -> list[Dict[str, Any]]:
+        """Delegate to shared FHIR coding builder for backwards compatibility."""
+
+        return fhir_mapper.build_coding(code, system_hint, display)
+
     def build_fhir_bundle(
         self,
         *,
@@ -21,45 +32,14 @@ class DemoFHIRExporter:
         entities: ClinicalEntities,
         soap_note: SOAPNote,
     ) -> Dict[str, Any]:
-        conditions = [
-            {
-                "resourceType": "Condition",
-                "code": {
-                    "text": e.text,
-                    "coding": ([{"code": e.code}] if e.code else []),
-                },
-            }
-            for e in entities.diagnoses
-        ]
-        medications = [
-            {
-                "resourceType": "MedicationStatement",
-                "medicationCodeableConcept": {"text": e.text},
-            }
-            for e in entities.medications
-        ]
+        """Build a FHIR document bundle via shared mapper utilities."""
 
-        composition = {
-            "resourceType": "Composition",
-            "status": "final",
-            "title": "Clinical SOAP Note",
-            "section": [
-                {"title": "Subjective", "text": {"status": "generated", "div": soap_note.subjective.text}},
-                {"title": "Objective", "text": {"status": "generated", "div": soap_note.objective.text}},
-                {"title": "Assessment", "text": {"status": "generated", "div": soap_note.assessment.text}},
-                {"title": "Plan", "text": {"status": "generated", "div": soap_note.plan.text}},
-            ],
-        }
-
-        entries = [{"resource": composition}] + [{"resource": r} for r in conditions + medications]
-
-        bundle: Dict[str, Any] = {
-            "resourceType": "Bundle",
-            "type": "document",
-            "id": str(job_id),
-            "entry": entries,
-        }
-        return bundle
+        return fhir_mapper.build_document_bundle(
+            bundle_id=job_id,
+            entities=entities,
+            soap_note=soap_note,
+            encounter=None,
+        )
 
 
 demo_fhir_exporter = DemoFHIRExporter()

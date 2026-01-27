@@ -3,8 +3,11 @@ from uuid import UUID
 from src.backend.services.encounters.service import encounter_service
 from src.backend.domain.models.clinical_encounter import EncounterStatus
 from src.backend.main import app
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from fastapi import status
+import pytest
+
+pytestmark = pytest.mark.asyncio
 
 
 def test_create_encounter_and_attach_job():
@@ -62,7 +65,7 @@ def test_upsert_note_advances_status():
 
 
 async def test_create_and_get_encounter_via_api():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # auth is disabled by default in tests; get_current_user will synthesize an admin
         create_resp = await ac.post(
             "/api/v1/encounters/",

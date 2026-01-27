@@ -1,11 +1,14 @@
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from fastapi import status
+import pytest
 
 from src.backend.main import app
 
+pytestmark = pytest.mark.asyncio
+
 
 async def test_analyze_completed_transcription_job():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         # First create a synchronous transcription job
         create_resp = await ac.post(
             "/api/v1/transcriptions/",

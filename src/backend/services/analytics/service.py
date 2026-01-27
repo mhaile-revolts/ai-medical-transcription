@@ -3,9 +3,14 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Optional
 
-from src.backend.domain.models.analytics import ClinicOverviewMetrics, ClinicianSummaryMetrics
+from src.backend.domain.models.analytics import (
+    ClinicOverviewMetrics,
+    ClinicianSummaryMetrics,
+    PilotSummaryMetrics,
+)
 from src.backend.domain.models.clinical_encounter import ClinicalEncounter, EncounterStatus
 from src.backend.infra.db.inmemory import encounter_repository, clinical_note_repository
+from src.backend.services.transcription.service import transcription_service
 
 
 class AnalyticsService:
@@ -70,6 +75,46 @@ class AnalyticsService:
             notes_finalized=notes_finalized,
             notes_pending_review=notes_pending,
             avg_finalization_delay_minutes=avg_delay,
+        )
+
+    def compute_pilot_summary(self) -> PilotSummaryMetrics:
+        """Compute lightweight pilot metrics from in-memory state.
+
+        This is intentionally approximate but good enough for early dashboards.
+        """
+
+        encounters = list(encounter_repository.list_by_filters())
+
+        from src.backend.domain.models.transcription_job import TranscriptJobStatus
+
+        total_analyzed_jobs = 0
+        high_risk_jobs = 0
+
+        # Approximate "analyzed" as: jobs attached to encounters that have a note
+        # and are in COMPLETED state.
+        seen_job_ids: set = set()
+        for enc in encounters:
+            note = clinical_note_repository.get_by_encounter(enc.id)
+            if note is None:
+                continue
+            for job_id in enc.transcription_job_ids:
+                if job_id in seen_job_ids:
+                    continue
+                seen_job_ids.add(job_id)
+                job = transcription_service.get_job(job_id)
+                if job is None or job.status != TranscriptJobStatus.COMPLETED or not job.result_text:
+                    continue
+                total_analyzed_jobs += 1
+
+        # In this MVP we do not recompute codes or sessions; those can be wired
+        # in later as persisted analysis results become available.
+        return PilotSummaryMetrics(
+            total_analyzed_jobs=total_analyzed_jobs,
+            total_analyzed_sessions=0,
+            avg_codes_per_job=None,
+            high_risk_jobs=high_risk_jobs,
+            feedback_items_overall=0,
+            feedback_items_codes=0,
         )
 
 

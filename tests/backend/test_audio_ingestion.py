@@ -1,12 +1,15 @@
 from starlette.testclient import TestClient
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from fastapi import status
+import pytest
 
 from src.backend.main import app
 
+pytestmark = pytest.mark.asyncio
+
 
 async def test_upload_audio_creates_transcription_job():
-    client = AsyncClient(app=app, base_url="http://test")
+    client = AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
     try:
         files = {"file": ("demo.wav", b"fake-binary", "audio/wav")}
         response = await client.post(
@@ -32,11 +35,12 @@ async def test_upload_audio_creates_transcription_job():
 
 
 def test_live_transcription_websocket():
-    client = TestClient(app)
+    with TestClient(app) as client:
+        with client.websocket_connect("/api/v1/audio/ws") as websocket:
+            websocket.send_bytes(b"hello")
+            message = websocket.receive_json()
+            # Ask server to finalize and close cleanly to avoid runtime errors on shutdown.
+            websocket.send_text("stop")
 
-    with client.websocket_connect("/api/v1/audio/ws") as websocket:
-        websocket.send_bytes(b"hello")
-        message = websocket.receive_json()
-
-    assert "partial_text" in message
-    assert message["total_bytes"] == len(b"hello")
+            assert "partial_text" in message
+            assert message["total_bytes"] == len(b"hello")
