@@ -8,7 +8,12 @@ from pydantic import BaseModel, HttpUrl
 from src.backend.domain.models.transcription_job import TranscriptJob
 from src.backend.services.transcription.service import transcription_service
 from src.backend.services.audit.service import audit_service
-from src.backend.security import get_api_key
+from src.backend.security import get_api_key, get_current_user, ensure_can_view_encounter
+from src.backend.domain.models.user import User
+from src.backend.services.encounters.service import encounter_service
+from src.backend.config import settings
+from fastapi import HTTPException
+from uuid import UUID
 from src.backend.tenancy import tenant_dependency
 
 router = APIRouter(
@@ -20,6 +25,7 @@ router = APIRouter(
 
 class CreateAsyncTranscriptionRequest(BaseModel):
     audio_url: HttpUrl | str
+    encounter_id: Optional[UUID] = None
     language_code: Optional[str] = None
     target_language: Optional[str] = None
 
@@ -28,6 +34,7 @@ class CreateAsyncTranscriptionRequest(BaseModel):
 async def create_transcription_async(
     request: CreateAsyncTranscriptionRequest,
     background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
 ) -> TranscriptJob:
     """Create a transcription job that is processed in the background.
 
@@ -35,11 +42,24 @@ async def create_transcription_async(
     its status becomes COMPLETED or FAILED.
     """
 
+    if settings.app_env not in {"development", "test"} and request.encounter_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="encounter_id is required for PHI transcription jobs",
+        )
+    encounter = None
+    if request.encounter_id is not None:
+        encounter = encounter_service.get_encounter(request.encounter_id)
+        if encounter is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")
+        ensure_can_view_encounter(current_user, encounter.clinician_id)
     job = transcription_service.enqueue_job(
         audio_url=str(request.audio_url),
         language_code=request.language_code,
         target_language=request.target_language,
     )
+    if encounter is not None:
+        encounter_service.attach_job(encounter_id=encounter.id, job_id=job.id)
     background_tasks.add_task(transcription_service.process_job, job.id)
 
     audit_service.log_event(

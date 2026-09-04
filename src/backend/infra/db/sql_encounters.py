@@ -92,3 +92,15 @@ class SqlEncounterRepository(EncounterRepository):  # pragma: no cover - skeleto
             session.commit()
         finally:
             session.close()
+
+    def delete(self, encounter_id: UUID) -> None:
+        session = self._session_factory()
+        try:
+            row = session.get(EncounterORM, encounter_id)
+            if row is not None and row.tenant_id == get_current_tenant():
+                session.delete(row)
+                session.commit()
+                from src.backend.services.encounters.service import encounter_service
+                encounter_service._encounters.pop(encounter_id, None)  # type: ignore[attr-defined]
+        finally:
+            session.close()

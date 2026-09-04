@@ -51,7 +51,7 @@ export function EncountersListPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Encounters</h1>
         <Link to="/settings" className="text-sm text-blue-600 hover:underline">
-          API settings
+          Account
         </Link>
       </div>
 

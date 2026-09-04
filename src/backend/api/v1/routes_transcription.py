@@ -18,8 +18,10 @@ from src.backend.services.nlp.emotion_classifier import emotion_classifier
 from src.backend.services.ehr.service import demo_fhir_exporter
 from src.backend.services.encounters.service import encounter_service
 from src.backend.services.audit.service import audit_service
-from src.backend.security import get_api_key
+from src.backend.security import get_api_key, get_current_user, ensure_can_view_encounter
+from src.backend.domain.models.user import User, UserRole
 from src.backend.tenancy import tenant_dependency
+from src.backend.config import settings
 
 router = APIRouter(
     prefix="/transcriptions",
@@ -28,14 +30,27 @@ router = APIRouter(
 )
 
 
+def _ensure_job_access(job_id: UUID, user: User) -> None:
+    """Transcripts are PHI; a tenant match alone is not sufficient for staff."""
+    encounter = encounter_service.find_encounter_for_job(job_id)
+    if encounter is None:
+        if user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unassigned transcription is restricted")
+        return
+    ensure_can_view_encounter(user, encounter.clinician_id)
+
+
 class CreateTranscriptionRequest(BaseModel):
     audio_url: HttpUrl | str
+    encounter_id: Optional[UUID] = None
     language_code: Optional[str] = None  # Source language
     target_language: Optional[str] = None  # Desired translation target
 
 
 @router.post("/", response_model=TranscriptJob, status_code=status.HTTP_201_CREATED)
-async def create_transcription(request: CreateTranscriptionRequest) -> TranscriptJob:
+async def create_transcription(
+    request: CreateTranscriptionRequest, current_user: User = Depends(get_current_user)
+) -> TranscriptJob:
     """Submit a new transcription job from an existing audio URL.
 
     In this initial prototype, jobs are processed synchronously and stored in
@@ -43,11 +58,24 @@ async def create_transcription(request: CreateTranscriptionRequest) -> Transcrip
     processing.
     """
 
+    if settings.app_env not in {"development", "test"} and request.encounter_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="encounter_id is required for PHI transcription jobs",
+        )
+    encounter = None
+    if request.encounter_id is not None:
+        encounter = encounter_service.get_encounter(request.encounter_id)
+        if encounter is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")
+        ensure_can_view_encounter(current_user, encounter.clinician_id)
     job = transcription_service.create_job(
         audio_url=str(request.audio_url),
         language_code=request.language_code,
         target_language=request.target_language,
     )
+    if encounter is not None:
+        encounter_service.attach_job(encounter_id=encounter.id, job_id=job.id)
 
     audit_service.log_event(
         action="create_transcription",
@@ -60,10 +88,11 @@ async def create_transcription(request: CreateTranscriptionRequest) -> Transcrip
 
 
 @router.get("/{job_id}", response_model=TranscriptJob)
-async def get_transcription(job_id: UUID) -> TranscriptJob:
+async def get_transcription(job_id: UUID, current_user: User = Depends(get_current_user)) -> TranscriptJob:
     job = transcription_service.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcription job not found")
+    _ensure_job_access(job_id, current_user)
 
     audit_service.log_event(
         action="get_transcription",
@@ -87,7 +116,9 @@ class FHIRExportResponse(BaseModel):
 
 
 @router.post("/{job_id}/analyze", response_model=AnalyzeTranscriptionResponse)
-async def analyze_transcription(job_id: UUID) -> AnalyzeTranscriptionResponse:
+async def analyze_transcription(
+    job_id: UUID, current_user: User = Depends(get_current_user)
+) -> AnalyzeTranscriptionResponse:
     """Run clinical NLP pipeline on an existing transcription job.
 
     Uses the job's result_text as input. The job must be COMPLETED.
@@ -96,6 +127,7 @@ async def analyze_transcription(job_id: UUID) -> AnalyzeTranscriptionResponse:
     job = transcription_service.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcription job not found")
+    _ensure_job_access(job_id, current_user)
     if not job.result_text:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transcription result not available yet")
 
@@ -142,7 +174,9 @@ async def analyze_transcription(job_id: UUID) -> AnalyzeTranscriptionResponse:
 
 
 @router.post("/{job_id}/export/fhir", response_model=FHIRExportResponse)
-async def export_transcription_fhir(job_id: UUID) -> FHIRExportResponse:
+async def export_transcription_fhir(
+    job_id: UUID, current_user: User = Depends(get_current_user)
+) -> FHIRExportResponse:
     """Export a completed transcription job as a demo FHIR Bundle.
 
     This reuses the NLP pipeline internally, then maps the results into a
@@ -152,6 +186,7 @@ async def export_transcription_fhir(job_id: UUID) -> FHIRExportResponse:
     job = transcription_service.get_job(job_id)
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transcription job not found")
+    _ensure_job_access(job_id, current_user)
     if not job.result_text:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transcription result not available yet")
 

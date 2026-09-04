@@ -1,169 +1,165 @@
+"""Authentication and authorization primitives.
+
+Production requests are authenticated exclusively with a verified Clerk JWT.
+The development/test override is intentionally conspicuous and cannot be
+enabled merely by supplying a header in a deployed environment.
+"""
 from __future__ import annotations
 
-import hashlib
 from contextvars import ContextVar
-from typing import List, Optional
+from typing import Any, Optional
 
-from fastapi import Depends, HTTPException, Security, status
-
-from src.backend.domain.models.user import User, UserRole
-from src.backend.services.users.service import user_service
-from fastapi.security import APIKeyHeader
+import jwt
+from fastapi import Depends, HTTPException, Request, WebSocket, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from src.backend.config import settings
+from src.backend.domain.models.user import User, UserRole
+from src.backend.services.users.service import user_service
+from src.backend.tenancy import set_current_tenant
 
-# API key is expected in this header when ENABLE_API_AUTH is true.
-_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
-
-# Context variable storing a stable, non-raw identifier for the current caller
-# (e.g., a hashed API key). This allows downstream consumers such as the
-# audit logger to associate events with a subject without exposing the raw
-# secret.
+_bearer = HTTPBearer(auto_error=False)
 _current_subject: ContextVar[Optional[str]] = ContextVar("current_subject", default=None)
+_current_claims: ContextVar[Optional[dict[str, Any]]] = ContextVar("current_claims", default=None)
 
 
 def get_current_subject() -> Optional[str]:
-    """Return the current subject identifier, if any.
-
-    This is typically set by ``get_api_key`` when API authentication is
-    enabled. The value is a stable hash-derived identifier, not the raw
-    secret.
-    """
-
     return _current_subject.get()
 
 
-def _parse_api_keys() -> List[str]:
-    """Return the configured API keys as a normalized list.
-
-    API_KEYS is treated as a comma-separated list. Whitespace is stripped and
-    empty entries are ignored.
-    """
-
-    if not settings.api_keys:
-        return []
-    return [key.strip() for key in settings.api_keys.split(",") if key.strip()]
+def _development_override_allowed() -> bool:
+    return settings.app_env in {"development", "test"}
 
 
-async def get_api_key(api_key: Optional[str] = Security(_api_key_header)) -> str:
-    """FastAPI dependency for simple API-key based authentication.
-
-    - If ENABLE_API_AUTH is false (default for development/tests), this is a
-      no-op and always succeeds.
-    - If ENABLE_API_AUTH is true, a valid API key must be supplied in the
-      X-API-Key header and match the configured API_KEYS list.
-    """
-
-    if not settings.enable_api_auth:
-        # Auth disabled – clear any previously set subject and treat as a
-        # no-op dependency so existing tests and local development remain
-        # unaffected.
-        _current_subject.set(None)
-        return ""
-
-    allowed_keys = _parse_api_keys()
-    if not allowed_keys:
-        # Misconfiguration: auth is enabled but no keys are configured.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="API authentication is enabled but no API keys are configured.",
-        )
-
-    if not api_key or api_key not in allowed_keys:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key.",
-        )
-
-    # Derive a non-reversible, stable identifier from the API key for use as a
-    # "subject" in audit logs and similar features. This avoids logging the
-    # raw secret while still letting us correlate actions by the same caller.
-    subject_id = "api-key:" + hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:16]
-    _current_subject.set(subject_id)
-
-    return api_key
+def _role(value: Any) -> UserRole:
+    if not value:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="JWT clinic role is required")
+    normalized = str(value).lower().replace("org:", "")
+    try:
+        return UserRole(normalized)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="JWT has no permitted clinic role")
 
 
-async def get_current_user(api_key: str = Depends(get_api_key)) -> User:
-    """Resolve the current User based on the derived auth subject.
+def _verify_token(token: str) -> dict[str, Any]:
+    try:
+        kwargs: dict[str, Any] = {
+            "algorithms": ["RS256", "RS384", "RS512", "ES256", "ES384", "ES512"],
+            "options": {"require": ["sub", "exp"]},
+        }
+        if settings.clerk_issuer:
+            kwargs["issuer"] = settings.clerk_issuer
+        if settings.clerk_audience:
+            kwargs["audience"] = settings.clerk_audience
+        else:
+            kwargs["options"]["verify_aud"] = False
+        if settings.clerk_jwt_public_key:
+            return jwt.decode(token, settings.clerk_jwt_public_key, **kwargs)
+        if settings.clerk_jwks_url:
+            key = jwt.PyJWKClient(settings.clerk_jwks_url).get_signing_key_from_jwt(token).key
+            return jwt.decode(token, key, **kwargs)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid authentication token") from exc
+    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="JWT verification is not configured")
 
-    For the MVP we maintain a small in-memory mapping of auth subjects to
-    concrete User objects. In a future iteration this can be replaced with a
-    proper database-backed user store or JWT-based authentication without
-    changing downstream dependencies.
-    """
 
-    # If API auth is disabled, treat the caller as an anonymous admin-like user
-    # for development convenience. This branch should not be used in
-    # production/pilot environments.
-    subject = get_current_subject()
-    if subject is None:
-        # Synthesize a single admin user when auth is disabled.
-        return user_service.upsert_user_for_subject(
-            subject="anonymous",
-            email="anonymous@example.com",
-            role=UserRole.ADMIN,
-        )
+async def get_api_key(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(_bearer),
+) -> str:
+    """Compatibility-named authentication dependency; API keys are not accepted."""
+    token = credentials.credentials if credentials else request.cookies.get("__session")
+    if token:
+        claims = _verify_token(token)
+        subject = claims.get("sub")
+        tenant = claims.get("org_id") or claims.get("tenant_id")
+        if not subject or not tenant:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="JWT tenant membership is required")
+        _current_subject.set(str(subject))
+        _current_claims.set(claims)
+        set_current_tenant(str(tenant))
+        return str(subject)
 
+    # This override provides compatibility for isolated developer tests.  It
+    # is impossible in staging/production regardless of supplied headers.
+    if _development_override_allowed():
+        subject = request.headers.get("X-Test-Subject", "development-user")
+        tenant = request.headers.get("X-Test-Tenant") or request.headers.get("X-Tenant-ID") or "default"
+        role = request.headers.get("X-Test-Role", "admin")
+        _current_subject.set(subject)
+        _current_claims.set({"sub": subject, "tenant_id": tenant, "role": role})
+        set_current_tenant(tenant)
+        return subject
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+
+async def get_current_user(subject: str = Depends(get_api_key)) -> User:
+    claims = _current_claims.get() or {}
+    tenant = claims.get("org_id") or claims.get("tenant_id")
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant membership is required")
+    role = _role(claims.get("org_role") or claims.get("role"))
+    email = str(claims.get("email") or f"{subject}@example.com")
+    # The service is tenant-context aware; do not permit a subject from one
+    # organization to reuse a User record created in another organization.
     user = user_service.get_user_by_subject(subject)
     if user is None:
-        # For now, default new subjects to clinician role.
-        user = user_service.upsert_user_for_subject(
-            subject=subject,
-            email=f"user+{subject[:8]}@example.com",
-            role=UserRole.CLINICIAN,
-        )
-
+        user = user_service.upsert_user_for_subject(subject=subject, email=email, role=role)
+    elif user.tenant_id != str(tenant):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant membership mismatch")
+    elif user.role != role:
+        # Roles are identity-provider claims, not mutable API input.
+        user = user_service.upsert_user_for_subject(subject=subject, email=email, role=role)
     return user
 
 
+async def get_websocket_user(websocket: WebSocket) -> User:
+    """Authenticate a WebSocket before accepting PHI-bearing audio frames."""
+    authorization = websocket.headers.get("authorization", "")
+    token = authorization.removeprefix("Bearer ").strip() or websocket.cookies.get("__session")
+    if token:
+        claims = _verify_token(token)
+        subject = claims.get("sub")
+        tenant = claims.get("org_id") or claims.get("tenant_id")
+        if not subject or not tenant:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="JWT tenant membership is required")
+    elif _development_override_allowed():
+        subject = websocket.headers.get("X-Test-Subject", "development-user")
+        tenant = (
+            websocket.headers.get("X-Test-Tenant")
+            or websocket.headers.get("X-Tenant-ID")
+            or "default"
+        )
+        claims = {
+            "sub": subject,
+            "tenant_id": tenant,
+            "role": websocket.headers.get("X-Test-Role", "admin"),
+        }
+    else:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+
+    _current_subject.set(str(subject))
+    _current_claims.set(claims)
+    set_current_tenant(str(tenant))
+    return await get_current_user(str(subject))
+
+
 def ensure_can_view_encounter(user: User, clinician_id: Optional[str]) -> None:
-    """Raise HTTP 403 if the user is not allowed to view an encounter.
-
-    Admins can view all encounters. Clinicians can only view encounters where
-    the clinician_id matches their own user id (stringified UUID).
-    """
-
     if user.role == UserRole.ADMIN:
         return
-
     if clinician_id is None or str(user.id) != clinician_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to view this encounter",
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to view this encounter")
 
 
 def ensure_can_edit_encounter(user: User, clinician_id: Optional[str]) -> None:
-    """Raise HTTP 403 if the user is not allowed to edit an encounter.
-
-    For the MVP we apply the same rule as for viewing.
-    """
-
     ensure_can_view_encounter(user, clinician_id)
 
 
 def ensure_is_admin(user: User) -> None:
-    """Raise HTTP 403 unless the current user is an administrator."""
-
-    if user.role == UserRole.ADMIN:
-        return
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Administrator access required",
-    )
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required")
 
 
 def ensure_is_scribe_or_admin(user: User) -> None:
-    """Raise HTTP 403 if the user is not a scribe or admin.
-
-    Used for scribe-panel endpoints that should be restricted to back-office
-    scribes and administrators.
-    """
-
-    if user.role in {UserRole.ADMIN, UserRole.SCRIBE}:
-        return
-    raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Not authorized to access scribe resources",
-    )
+    if user.role not in {UserRole.ADMIN, UserRole.SCRIBE}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to access scribe resources")

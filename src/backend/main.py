@@ -1,4 +1,5 @@
 from pathlib import Path
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from fastapi import FastAPI
@@ -23,8 +24,35 @@ from src.backend.api.v1.routes_culture import router as culture_router_v1
 from src.backend.api.v1.routes_ehr import router as ehr_router_v1
 from src.backend.config import settings
 from src.backend.infra.db.bootstrap import init_sql_repositories
+from src.backend.services.audit.service import configure_audit_sink
 
 app = FastAPI(title="AI Medical Transcription Detector API")
+
+def _validate_security_configuration() -> None:
+    """Reject insecure PHI deployment defaults before accepting requests."""
+    if settings.app_env in {"development", "test"}:
+        return
+    failures = []
+    if settings.app_mode == "demo":
+        failures.append("APP_MODE=demo is not permitted outside development/test")
+    if "*" in [o.strip() for o in settings.cors_allow_origins.split(",")]:
+        failures.append("CORS_ALLOW_ORIGINS must name explicit origins")
+    if any(
+        urlparse(origin.strip()).scheme != "https"
+        for origin in settings.cors_allow_origins.split(",")
+        if origin.strip()
+    ):
+        failures.append("CORS_ALLOW_ORIGINS must use HTTPS origins")
+    if not (settings.clerk_jwks_url or settings.clerk_jwt_public_key):
+        failures.append("configure CLERK_JWKS_URL or CLERK_JWT_PUBLIC_KEY")
+    if not settings.clerk_issuer:
+        failures.append("configure CLERK_ISSUER")
+    if min(settings.phi_audio_retention_days, settings.phi_transcript_retention_days, settings.audit_retention_days) <= 0:
+        failures.append("PHI and audit retention periods must be positive")
+    if not settings.audit_log_path:
+        failures.append("AUDIT_LOG_PATH is required")
+    if failures:
+        raise RuntimeError("Unsafe deployment configuration: " + "; ".join(failures))
 
 
 @app.on_event("startup")
@@ -37,6 +65,8 @@ async def startup_event():
     database), this is a no-op and the in-memory repositories remain active.
     """
 
+    _validate_security_configuration()
+    configure_audit_sink()
     if settings.app_mode != "demo" or settings.use_sql_repos:
         init_sql_repositories()
 
@@ -49,8 +79,7 @@ async def shutdown_event():
     """
     pass
 
-# CORS configuration – permissive by default for development. Tighten via
-# CORS_ALLOW_ORIGINS in production deployments.
+# CORS defaults are development-only; startup rejects wildcard production CORS.
 allow_origins = [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()] or ["*"]
 app.add_middleware(
     CORSMiddleware,

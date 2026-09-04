@@ -22,20 +22,20 @@ It focuses on the FastAPI backend and the React frontend in `src/frontend/web`.
   - Durable mode stores private audio blobs in PostgreSQL; demo uses
     `AUDIO_UPLOAD_DIR` (default `uploads/`).
 - Security:
-  - API key auth via `ENABLE_API_AUTH` + `API_KEYS`.
-  - Basic RBAC (clinician/admin) and audit logging.
+  - Clerk JWT authentication with tenant-scoped RBAC and audit logging.
 
 ### Frontend (web)
 
 - React + Vite app under `src/frontend/web`.
-- Talks to backend via `VITE_API_BASE_URL`.
-- Uses `X-API-Key` header for auth (when enabled).
+- Talks to the backend through same-origin `/api` routes.
+- Uses Clerk session cookies for individual user authentication.
 
 ### Mobile client (Android + iOS)
 
 - Expo React Native app under `src/frontend/mobile`.
 - Talks to backend via `EXPO_PUBLIC_API_BASE_URL` (set per build profile in `eas.json`).
-- Uses `X-API-Key` header for auth (when enabled) entered by the user in the mobile UI.
+- The legacy mobile API-key screen is development-only. Do not distribute a
+  PHI-capable mobile build until it uses individual Clerk bearer tokens.
 - Supports:
   - HTTP audio upload via `/api/v1/audio/upload`.
   - Live WebSocket transcription via `/api/v1/audio/ws` (with partial transcripts).
@@ -66,21 +66,55 @@ Key settings:
   - `AUDIO_UPLOAD_DIR` – demo-mode upload directory (default: `uploads`).
 
 - **Security / auth**
-  - `ENABLE_API_AUTH` – `"true"` or `"false"` (default `"false"`).
-  - `API_KEYS` – comma‑separated list of allowed API keys when auth is enabled.
-  - `X-API-Key` – HTTP header used by clients to authenticate when API auth is enabled.
+  - Set `APP_ENV=production` (or `staging`) for any deployed environment.
+    Production rejects demo mode, wildcard CORS, missing Clerk issuer, and
+    missing JWT verification configuration at startup.
+  - `CLERK_ISSUER` – optional expected Clerk issuer URL. When omitted, the
+    backend derives it from the provisioned `CLERK_PUBLISHABLE_KEY`.
+  - `CLERK_AUDIENCE` – expected token audience (when configured in Clerk).
+  - `CLERK_JWKS_URL` – optional Clerk JWKS endpoint (derived from the issuer
+    when omitted); alternatively set
+    `CLERK_JWT_PUBLIC_KEY` to a PEM public key supplied through a secret
+    manager. Send the Clerk session JWT as `Authorization: Bearer <JWT>` or
+    the secure `__session` cookie. The verified `sub`, `org_id`/`tenant_id`,
+    and `org_role`/`role` claims determine identity, tenant, and role.
+  - `X-API-Key` and `X-Tenant-ID` are not authentication controls and are
+    ignored for production identity. `X-Test-*` overrides are enabled only
+    when `APP_ENV=development` or `test`.
 
 - **Multitenancy**
-  - `X-Tenant-ID` – HTTP header that selects the logical tenant/clinic for each request.
-    - If omitted, the backend uses a default tenant ("default").
-    - Data in encounters, notes, transcription jobs, and sessions is partitioned by tenant.
+  - Tenant context comes only from verified JWT organization claims. Data in
+    encounters, notes, transcription jobs, and sessions is partitioned by it.
 
 - **Request limits**
   - `MAX_UPLOAD_BYTES` – max HTTP upload size in bytes (default 10 MiB).
   - `MAX_WS_BYTES` – max WebSocket audio bytes per connection (default 10 MiB).
 
 - **CORS**
-  - `CORS_ALLOW_ORIGINS` – comma‑separated allowed origins (default `"*"`).
+  - `CORS_ALLOW_ORIGINS` – comma-separated explicit HTTPS origins. `"*"` is
+    development-only and is rejected in staging/production.
+  - Serve the web app and `/api` from one public origin (use a reverse proxy).
+    Clerk web authentication is cookie-based; do not point the browser at a
+    separately hosted API origin.
+
+- **PHI retention and deletion**
+  - `PHI_AUDIO_RETENTION_DAYS` (default 30), `PHI_TRANSCRIPT_RETENTION_DAYS`
+    (default 2555), and `AUDIT_RETENTION_DAYS` (default 2555) are required
+    positive values outside development/test. Run a documented, tenant-scoped
+    retention worker at least daily by invoking `POST /api/v1/patients/retention/purge`
+    as a tenant administrator, and verify backup expiration separately.
+  - Patient deletion is an administrator-only, tenant-scoped operation. It
+    must delete the patient's encounters, clinical notes, jobs, and private
+    audio and emit an ID-only audit event. Keep immutable audit records under
+    the configured audit-retention policy unless legal requirements say
+    otherwise.
+  - Store `CLERK_JWKS_URL`, PEM keys, database credentials, and provider keys
+    in the platform secret manager; never commit them, put them in frontend
+    builds, or log JWTs/transcripts.
+  - Set `AUDIT_LOG_PATH` to a protected persistent path. The app opens it at
+    startup with mode `0600` and UTC daily rotation for `AUDIT_RETENTION_DAYS`.
+    Ship these files to an append-only, access-controlled archive; production
+    startup fails if the local sink cannot be configured.
 
 - **Database / repositories**
   - `DATABASE_URL` – SQLAlchemy database URL. For Postgres (recommended beyond local dev):
@@ -101,7 +135,9 @@ Key settings:
 
 ### Frontend (`src/frontend/web`)
 
-- `VITE_API_BASE_URL` – base URL of the backend, e.g. `http://localhost:8000` or your staging/pilot URL.
+- `VITE_CLERK_PUBLISHABLE_KEY` is provisioned by Replit Clerk Auth.
+- The browser always uses same-origin `/api`; configure the reverse proxy, not
+  a client-side API base URL.
 
 ### Mobile (`src/frontend/mobile`)
 
@@ -155,9 +191,9 @@ Key settings:
 
    By default:
 
-   - `ENABLE_API_AUTH=false` → no auth required.
+   - Development requests may use the explicit `X-Test-*` identity headers.
    - `APP_MODE=demo` → in-memory records and `AUDIO_UPLOAD_DIR=uploads`.
-   - Multitenancy: if `X-Tenant-ID` is omitted, all requests use the "default" tenant.
+   - The test identity defaults to the synthetic `"default"` tenant.
 
 ### 3.2. Frontend – dev
 
@@ -168,25 +204,18 @@ Key settings:
    npm install
    ```
 
-2. **Configure API base URL**
-
-   Create `.env.local` in `src/frontend/web`:
-
-   ```env
-   VITE_API_BASE_URL=http://localhost:8000
-   ```
-
-3. **Run dev server**
+2. **Run dev server**
 
    ```bash
    npm run dev
    ```
 
-4. **Use the app**
+3. **Use the app**
 
    - Visit the URL printed by Vite (default `http://localhost:5173`).
-   - If auth is disabled, you can go directly to `/encounters`.
-   - Otherwise, go to `/settings` and enter your API key.
+   - Sign in with an individual Clerk development account.
+   - The account must have `tenant_id` and `role` (or `org_id` and `org_role`)
+     in its verified session claims before clinical routes are available.
 
 ### 3.3. Mobile – dev
 
@@ -206,7 +235,8 @@ Key settings:
 3. **Backend URL & auth**
 
    - By default the app uses `EXPO_PUBLIC_API_BASE_URL` if set, otherwise `http://localhost:8000`.
-   - If API key auth is enabled on the backend, enter your key in the mobile app under the **Authentication** section; it is sent as `X-API-Key` for HTTP and WebSocket calls.
+   - The current mobile authentication UI is retained only for synthetic local
+     development and is rejected by staging/production APIs.
 
 4. **Audio flows**
 
@@ -239,9 +269,8 @@ Staging should mirror pilot as closely as possible, but use only synthetic or de
    ```bash
    export DATABASE_URL="postgresql+psycopg2://user:password@host:5432/clinic_mvp_staging"
    export APP_MODE=durable
-
-   export ENABLE_API_AUTH=true
-   export API_KEYS="staging-key-1,staging-key-2"
+    export APP_ENV=staging
+    export AUDIT_LOG_PATH=/var/log/clinic/audit.jsonl
 
    export CORS_ALLOW_ORIGINS="https://staging-clinic-ui.example.com"
    alembic upgrade head
@@ -279,17 +308,7 @@ Staging should mirror pilot as closely as possible, but use only synthetic or de
 
    This produces static assets in `dist/`.
 
-2. **Set staging API base URL**
-
-   In staging CI/deploy pipeline, set:
-
-   ```env
-   VITE_API_BASE_URL=https://staging-clinic-api.example.com
-   ```
-
-   Then rebuild for staging.
-
-3. **Serve static files**
+2. **Serve static files**
 
    Options:
 
@@ -340,9 +359,8 @@ This is where you must be careful: most work here is infra and policy, not code.
    ```bash
    export DATABASE_URL="postgresql+psycopg2://user:password@securedb:5432/clinic_mvp_pilot"
    export APP_MODE=durable
-
-   export ENABLE_API_AUTH=true
-   export API_KEYS="pilot-clinic-key-1,pilot-clinic-key-2"
+    export APP_ENV=production
+    export AUDIT_LOG_PATH=/var/log/clinic/audit.jsonl
 
    export MAX_UPLOAD_BYTES=$((20 * 1024 * 1024))    # e.g. 20 MiB if needed
    export MAX_WS_BYTES=$((20 * 1024 * 1024))
@@ -371,13 +389,7 @@ This is where you must be careful: most work here is infra and policy, not code.
 
 ### 5.2. Frontend – pilot
 
-1. **Build with pilot API URL**
-
-   ```env
-   VITE_API_BASE_URL=https://pilot-clinic-api.example.com
-   ```
-
-   Then:
+1. **Build the web application**
 
    ```bash
    cd src/frontend/web
@@ -385,9 +397,10 @@ This is where you must be careful: most work here is infra and policy, not code.
    npm run build
    ```
 
-3. **Serve static content over HTTPS**
+2. **Serve static content over HTTPS**
 
-   - Use an HTTPS‑enabled frontend (e.g. Nginx with TLS) or a managed static host that meets your PHI/infrastructure requirements.
+   - Use an HTTPS-enabled reverse proxy that serves the frontend and forwards
+     `/api` and WebSocket traffic to FastAPI on the same public origin.
    - Restrict access (e.g. by clinic IP range, VPN, or SSO gateway).
 
 3. **Device & browser considerations**
@@ -398,6 +411,10 @@ This is where you must be careful: most work here is infra and policy, not code.
 ### 5.3. Mobile – pilot
 
 Pilot mobile builds should target the pilot API and be distributed only to approved clinician devices.
+
+The current mobile client is **not approved for PHI** because it still uses a
+shared API-key flow that production rejects. Complete individual Clerk mobile
+authentication before following the build steps below.
 
 1. **Configure `eas.json`**
 
@@ -432,8 +449,8 @@ Pilot mobile builds should target the pilot API and be distributed only to appro
 Before going live with real PHI:
 
 - [ ] **Auth and access**
-  - `ENABLE_API_AUTH=true` in pilot.
-  - API keys issued and safely stored.
+  - Individual Clerk identities are provisioned with verified tenant and role claims.
+  - Shared API keys and caller-selected tenant headers are rejected.
   - Backend/API not reachable without auth.
 
 - [ ] **Data persistence**
@@ -455,7 +472,7 @@ Before going live with real PHI:
   - If MultiChain is enabled, `/api/v1/system/blockchain/health` is returning `{"status": "ok"}`.
 
 - [ ] **Frontend**
-  - Correct `VITE_API_BASE_URL` for pilot.
+  - Frontend and `/api` are served from the same HTTPS origin.
   - Visible environment banner ("Pilot – real PHI") to avoid confusion.
   - Clinician quick‑start guide distributed.
 
@@ -497,7 +514,7 @@ npm run dev
 
 ```bash
 cd src/frontend/web
-VITE_API_BASE_URL=https://your-api.example.com npm run build
+npm run build
 # deploy contents of dist/ to your static host
 ```
 

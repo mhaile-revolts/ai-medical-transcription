@@ -15,15 +15,13 @@ from src.backend.services.transcription.service import transcription_service
 from src.backend.services.encounters.service import encounter_service
 from src.backend.infra.storage.audio import audio_storage_backend
 from src.backend.services.audit.service import audit_service
-from src.backend.security import get_api_key
-from src.backend.tenancy import tenant_dependency, reset_current_tenant, set_current_tenant
+from src.backend.security import get_current_user, get_websocket_user, ensure_can_edit_encounter
+from src.backend.domain.models.user import User
+from src.backend.tenancy import get_current_tenant, reset_current_tenant, set_current_tenant
 
 router = APIRouter(
     prefix="/audio",
     tags=["audio"],
-    # For now, the audio routes do not enforce API key auth at the router level.
-    # Tenant scoping still applies via tenant_dependency.
-    dependencies=[Depends(tenant_dependency)],
 )
 
 
@@ -41,6 +39,7 @@ async def upload_audio(
     encounter_id: Optional[UUID] = None,
     patient_id: Optional[str] = None,
     clinician_id: Optional[str] = None,
+    current_user: User = Depends(get_current_user),
 ) -> IngestAudioResponse:
     """Ingest an uploaded audio file and create a transcription job.
 
@@ -96,11 +95,14 @@ async def upload_audio(
         encounter = encounter_service.get_encounter(encounter_id)
         if encounter is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")
+        ensure_can_edit_encounter(current_user, encounter.clinician_id)
         encounter_service.attach_job(encounter_id=encounter_id, job_id=job.id)
         attached_encounter_id = encounter_id
     else:
         encounter = encounter_service.create_encounter(
-            clinician_id=clinician_id,
+            # Caller-controlled clinician_id would allow assigning PHI to
+            # another clinician.  The authenticated identity owns new work.
+            clinician_id=str(current_user.id),
             patient_id=patient_id,
             title=file.filename,
         )
@@ -114,7 +116,6 @@ async def upload_audio(
         extra={
             "session_id": attached_session_id,
             "encounter_id": str(attached_encounter_id) if attached_encounter_id else None,
-            "filename": file.filename,
             "size_bytes": len(content),
         },
     )
@@ -134,12 +135,30 @@ async def live_transcription(websocket: WebSocket) -> None:
     """
 
     # Extract optional query parameters for language and session association.
+    current_user = await get_websocket_user(websocket)
     qp = websocket.query_params
-    tenant_token = set_current_tenant(websocket.headers.get("x-tenant-id", "default"))
+    tenant_token = set_current_tenant(get_current_tenant())
     language_code = qp.get("language_code")
     target_language = qp.get("target_language")
     session_id: Optional[UUID] = None
     session_id_str = qp.get("session_id")
+    encounter_id_str = qp.get("encounter_id")
+    encounter_id: Optional[UUID] = None
+    if encounter_id_str:
+        try:
+            encounter_id = UUID(encounter_id_str)
+        except ValueError:
+            await websocket.close(code=1008, reason="Invalid encounter_id")
+            return
+    if settings.app_env not in {"development", "test"} and encounter_id is None:
+        await websocket.close(code=1008, reason="encounter_id is required")
+        return
+    if encounter_id is not None:
+        encounter = encounter_service.get_encounter(encounter_id)
+        if encounter is None:
+            await websocket.close(code=1008, reason="Encounter not found")
+            return
+        ensure_can_edit_encounter(current_user, encounter.clinician_id)
     if session_id_str:
         try:
             session_id = UUID(session_id_str)
@@ -264,6 +283,8 @@ async def live_transcription(websocket: WebSocket) -> None:
                             session = conversation_service.get_session(session_id)
                             if session is not None:
                                 conversation_service.attach_job(session_id=session_id, job_id=job.id)
+                        if encounter_id is not None:
+                            encounter_service.attach_job(encounter_id=encounter_id, job_id=job.id)
                         # Use JSON mode so UUIDs and other types are serialized
                         # into JSON-compatible primitives for the WebSocket
                         # payload.

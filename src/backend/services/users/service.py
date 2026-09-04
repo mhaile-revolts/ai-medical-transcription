@@ -16,7 +16,7 @@ class InMemoryUserService:
     """
 
     def __init__(self) -> None:
-        self._by_subject: Dict[str, User] = {}
+        self._by_subject: Dict[tuple[str, str], User] = {}
         self._session_factory: Any = None
 
     def configure_persistence(self, session_factory: Any) -> None:
@@ -31,10 +31,13 @@ class InMemoryUserService:
     ) -> User:
         existing = self.get_user_by_subject(subject)
         if existing is not None:
+            # Identity-provider roles are authoritative and can change.
+            if existing.role != role:
+                existing.role = role
             return existing
 
         user = User(id=uuid4(), email=email, role=role, tenant_id=get_current_tenant())
-        self._by_subject[subject] = user
+        self._by_subject[(subject, user.tenant_id)] = user
         if self._session_factory is not None:
             from src.backend.infra.db.models import UserORM
             session = self._session_factory()
@@ -61,7 +64,7 @@ class InMemoryUserService:
                              tenant_id=row.tenant_id) if row else None)
             finally:
                 session.close()
-        return self._by_subject.get(subject)
+        return self._by_subject.get((subject, get_current_tenant()))
 
 
 user_service = InMemoryUserService()

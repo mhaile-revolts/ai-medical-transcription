@@ -140,7 +140,8 @@ async def list_encounters(
     results: List[EncounterSummary] = []
     # Use repository abstraction to list encounters matching optional filters.
     encounters_iter = encounter_repository.list_by_filters(
-        clinician_id=str(current_user.id) if own_only and current_user.role != current_user.role.ADMIN else None,
+        # A clinician is never allowed to bypass ownership with own_only=false.
+        clinician_id=str(current_user.id) if current_user.role != current_user.role.ADMIN else None,
         patient_id=patient_id,
         status=status_filter,
     )

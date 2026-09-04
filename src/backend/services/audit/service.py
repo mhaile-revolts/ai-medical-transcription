@@ -2,13 +2,51 @@ from __future__ import annotations
 
 import json
 import logging
+from logging.handlers import TimedRotatingFileHandler
+import os
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from src.backend.config import settings
+from src.backend.tenancy import get_current_tenant
 
 logger = logging.getLogger("audit")
+
+
+class SecureTimedRotatingFileHandler(TimedRotatingFileHandler):
+    """Keep the active and archived audit files owner-readable only."""
+
+    def _secure_active_file(self) -> None:
+        os.chmod(self.baseFilename, 0o600)
+
+    def doRollover(self) -> None:
+        super().doRollover()
+        self._secure_active_file()
+
+
+def configure_audit_sink() -> None:
+    """Open the production audit sink and enforce local access/retention."""
+    if settings.app_env in {"development", "test"}:
+        return
+    if settings.audit_log_path is None:
+        raise RuntimeError("AUDIT_LOG_PATH is required")
+    path = settings.audit_log_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handler = SecureTimedRotatingFileHandler(
+        path,
+        when="midnight",
+        # The active file is one retained day; archives cover the remainder.
+        backupCount=max(0, settings.audit_retention_days - 1),
+        encoding="utf-8",
+        utc=True,
+    )
+    handler._secure_active_file()
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logger.handlers.clear()
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
 
 
 @dataclass
@@ -24,10 +62,36 @@ class AuditEvent:
     resource_type: str
     resource_id: Optional[str] = None
     subject: Optional[str] = None
+    tenant_id: Optional[str] = None
     extra: Optional[Dict[str, Any]] = None
 
 
 class AuditService:
+    # Only operational metadata belongs in an audit event.  Free text often
+    # contains PHI, so unknown keys and text-like values are discarded.
+    _allowed_extra = {
+        "user_id", "role", "count", "finalize", "status", "enabled",
+        "suggestion_count", "has_codes", "billing_risk_level", "segment_count",
+        "bundle_entry_count", "async", "size_bytes", "total_bytes",
+        "session_id", "encounter_id",
+    }
+
+    @classmethod
+    def _sanitize_extra(cls, extra: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not extra:
+            return None
+        safe: Dict[str, Any] = {}
+        for key, value in extra.items():
+            if key not in cls._allowed_extra or value is None:
+                continue
+            if isinstance(value, (bool, int, float)):
+                safe[key] = value
+            elif key in {"role", "status", "billing_risk_level"} and isinstance(value, str) and len(value) <= 64:
+                safe[key] = value
+            elif key in {"user_id", "session_id", "encounter_id"} and isinstance(value, str) and len(value) <= 128:
+                safe[key] = value
+        return safe or None
+
     def log_event(
         self,
         *,
@@ -59,13 +123,18 @@ class AuditService:
             except Exception:
                 subject = None
 
+        try:
+            tenant_id = get_current_tenant()
+        except RuntimeError:
+            tenant_id = None
         event = AuditEvent(
             timestamp=datetime.now(timezone.utc).isoformat(),
             action=action,
             resource_type=resource_type,
             resource_id=resource_id,
             subject=subject,
-            extra=extra,
+            tenant_id=tenant_id,
+            extra=self._sanitize_extra(extra),
         )
 
         # Always log to the local structured logger first.

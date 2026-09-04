@@ -6,24 +6,13 @@ import {
   IngestAudioResponse,
 } from "./types";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
-
-let apiKey: string | null = null;
-
-export function setApiKey(key: string) {
-  apiKey = key;
-  localStorage.setItem("apiKey", key);
-}
-
-export function loadApiKeyFromStorage() {
-  const stored = localStorage.getItem("apiKey");
-  if (stored) apiKey = stored;
-}
+// The web client and API are deliberately same-origin. Clerk web sessions are
+// cookie based; a separate API origin would not receive the secure session.
+const API_BASE_URL = "";
 
 function getHeaders(extra: Record<string, string> = {}) {
   return {
     "Content-Type": "application/json",
-    ...(apiKey ? { "X-API-Key": apiKey } : {}),
     ...extra,
   };
 }
@@ -39,6 +28,7 @@ async function handle<T>(res: Response): Promise<T> {
 export async function getEncounters(): Promise<EncounterSummary[]> {
   const res = await fetch(`${API_BASE_URL}/api/v1/encounters?own_only=true`, {
     headers: getHeaders(),
+    credentials: "include",
   });
   return handle<EncounterSummary[]>(res);
 }
@@ -50,6 +40,7 @@ export async function createEncounter(input: {
   const res = await fetch(`${API_BASE_URL}/api/v1/encounters`, {
     method: "POST",
     headers: getHeaders(),
+    credentials: "include",
     body: JSON.stringify(input),
   });
   return handle<ClinicalEncounter>(res);
@@ -58,6 +49,7 @@ export async function createEncounter(input: {
 export async function getEncounterDetail(id: string): Promise<EncounterDetailResponse> {
   const res = await fetch(`${API_BASE_URL}/api/v1/encounters/${id}`, {
     headers: getHeaders(),
+    credentials: "include",
   });
   return handle<EncounterDetailResponse>(res);
 }
@@ -75,6 +67,7 @@ export async function updateEncounterNote(
   const res = await fetch(`${API_BASE_URL}/api/v1/encounters/${encounterId}/note`, {
     method: "PUT",
     headers: getHeaders(),
+    credentials: "include",
     body: JSON.stringify({ ...input, finalize: !!input.finalize }),
   });
   return handle<ClinicalNote>(res);
@@ -94,7 +87,7 @@ export async function uploadAudio(params: {
 
   const res = await fetch(`${API_BASE_URL}/api/v1/audio/upload`, {
     method: "POST",
-    headers: apiKey ? { "X-API-Key": apiKey } : {},
+    credentials: "include",
     body: form,
   });
   return handle<IngestAudioResponse>(res);
@@ -104,6 +97,7 @@ export async function analyzeLatestJob(jobId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/api/v1/transcriptions/${jobId}/analyze`, {
     method: "POST",
     headers: getHeaders(),
+    credentials: "include",
   });
   await handle(res);
 }

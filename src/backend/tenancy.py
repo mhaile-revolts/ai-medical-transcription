@@ -3,13 +3,13 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Optional
 
-from fastapi import Header
+from fastapi import HTTPException, status
 
 
 # Context variable storing the current tenant identifier for the in-flight request.
-# Defaults to "default" so existing single-tenant clients/tests continue to work
-# without specifying X-Tenant-ID.
-_current_tenant: ContextVar[str] = ContextVar("current_tenant", default="default")
+# There is deliberately no production default tenant.  A tenant exists only
+# after a verified identity has selected it.
+_current_tenant: ContextVar[Optional[str]] = ContextVar("current_tenant", default=None)
 
 
 def get_current_tenant() -> str:
@@ -19,12 +19,19 @@ def get_current_tenant() -> str:
     contexts (e.g., direct service calls in tests) it falls back to "default".
     """
 
-    return _current_tenant.get()
+    tenant = _current_tenant.get()
+    if not tenant:
+        from src.backend.config import settings
+
+        if settings.app_env in {"development", "test"}:
+            return "default"
+        raise RuntimeError("Tenant context has not been established")
+    return tenant
 
 
 def set_current_tenant(tenant_id: str):
     """Set tenant context for non-HTTP dependency flows such as WebSockets."""
-    return _current_tenant.set(tenant_id or "default")
+    return _current_tenant.set(tenant_id)
 
 
 def reset_current_tenant(token) -> None:
@@ -32,14 +39,13 @@ def reset_current_tenant(token) -> None:
     _current_tenant.reset(token)
 
 
-async def tenant_dependency(
-    x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
-) -> str:
-    """FastAPI dependency that establishes the tenant context for a request.
+async def tenant_dependency() -> str:
+    """Return the tenant established by verified authentication.
 
-    If the header is absent, we fall back to the "default" tenant.
+    Route authentication calls ``get_current_user`` before repository access;
+    this dependency is retained for compatibility and rejects unbound context.
     """
-
-    tenant_id = x_tenant_id or "default"
-    _current_tenant.set(tenant_id)
+    tenant_id = _current_tenant.get()
+    if not tenant_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Tenant membership is required")
     return tenant_id

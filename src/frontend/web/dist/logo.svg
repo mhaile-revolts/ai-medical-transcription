@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-label="Clinic Scribe">
+  <rect width="96" height="96" rx="24" fill="#0f172a"/>
+  <path d="M48 19v58M19 48h58" stroke="#38bdf8" stroke-width="13" stroke-linecap="round"/>
+  <circle cx="48" cy="48" r="34" fill="none" stroke="#e2e8f0" stroke-width="4"/>
+</svg>

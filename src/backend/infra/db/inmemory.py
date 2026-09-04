@@ -49,6 +49,11 @@ class InMemoryEncounterRepository(EncounterRepository):
         # semantics consistent for now.
         encounter_service._encounters[encounter.id] = encounter  # type: ignore[attr-defined]
 
+    def delete(self, encounter_id: UUID) -> None:
+        encounter = self.get(encounter_id)
+        if encounter is not None:
+            encounter_service._encounters.pop(encounter_id, None)  # type: ignore[attr-defined]
+
 
 class InMemoryClinicalNoteRepository(ClinicalNoteRepository):
     def get(self, note_id: UUID) -> Optional[ClinicalNote]:
@@ -70,6 +75,11 @@ class InMemoryClinicalNoteRepository(ClinicalNoteRepository):
     def save(self, note: ClinicalNote) -> None:
         encounter_service._notes[note.id] = note  # type: ignore[attr-defined]
 
+    def delete_by_encounter(self, encounter_id: UUID) -> None:
+        note = self.get_by_encounter(encounter_id)
+        if note is not None:
+            encounter_service._notes.pop(note.id, None)  # type: ignore[attr-defined]
+
 
 class InMemoryTranscriptionJobRepository(TranscriptionJobRepository):
     def get(self, job_id: UUID) -> Optional[TranscriptJob]:
@@ -80,6 +90,19 @@ class InMemoryTranscriptionJobRepository(TranscriptionJobRepository):
 
     def save(self, job: TranscriptJob) -> None:
         transcription_service._jobs[job.id] = job  # type: ignore[attr-defined]
+
+    def list_all(self) -> Iterable[TranscriptJob]:
+        current_tenant = get_current_tenant()
+        return [
+            job
+            for job in transcription_service._jobs.values()  # type: ignore[attr-defined]
+            if job.tenant_id == current_tenant
+        ]
+
+    def delete(self, job_id: UUID) -> None:
+        job = self.get(job_id)
+        if job is not None:
+            transcription_service._jobs.pop(job_id, None)  # type: ignore[attr-defined]
 
 
 class RepositoryProxy:

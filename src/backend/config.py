@@ -1,9 +1,22 @@
 from __future__ import annotations
 
 import os
+import base64
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+
+
+def _clerk_issuer_from_publishable_key() -> Optional[str]:
+    """Derive the Clerk frontend API issuer without logging the key."""
+    key = os.getenv("CLERK_PUBLISHABLE_KEY", "")
+    try:
+        encoded = key.split("_", 2)[2]
+        decoded = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)).decode()
+        host = decoded.rstrip("$")
+        return f"https://{host}" if host else None
+    except (IndexError, ValueError, UnicodeDecodeError):
+        return None
 
 
 @dataclass
@@ -51,6 +64,10 @@ class Settings:
     # Durable mode is deliberately the default: a missing database must stop
     # startup rather than silently accepting PHI into process memory.
     app_mode: str = os.getenv("APP_MODE", "durable").lower()
+    # development/test are the *only* environments where the explicit test
+    # identity override is available.  Deployments handling PHI must use
+    # staging or production.
+    app_env: str = os.getenv("APP_ENV", "development").lower()
 
     # Directory where uploaded audio files are stored (demo mode only).
     audio_upload_dir: Path = Path(os.getenv("AUDIO_UPLOAD_DIR", "uploads"))
@@ -89,12 +106,6 @@ class Settings:
     # codes via UmlsCodingBackend.
     umls_min_similarity: float = float(os.getenv("UMLS_MIN_SIMILARITY", "0.85"))
 
-    # Basic API authentication configuration.
-    # When ENABLE_API_AUTH=true, protected endpoints require a valid API key.
-    enable_api_auth: bool = os.getenv("ENABLE_API_AUTH", "false").lower() == "true"
-    # Comma-separated list of allowed API keys when auth is enabled.
-    api_keys: Optional[str] = os.getenv("API_KEYS")
-
     # Request size limits (in bytes).
     max_upload_bytes: int = int(os.getenv("MAX_UPLOAD_BYTES", str(10 * 1024 * 1024)))
     max_ws_bytes: int = int(os.getenv("MAX_WS_BYTES", str(10 * 1024 * 1024)))
@@ -103,6 +114,28 @@ class Settings:
     # Default is "*" (allow all) which is acceptable for local development but
     # should be tightened in production.
     cors_allow_origins: str = os.getenv("CORS_ALLOW_ORIGINS", "*")
+
+    # Clerk OpenID Connect verification.  Configure either CLERK_JWKS_URL
+    # (normal Clerk production setup) or CLERK_JWT_PUBLIC_KEY (PEM, useful for
+    # isolated deployments).  Claims are deliberately read only after JWT
+    # signature/issuer/audience validation.
+    clerk_issuer: Optional[str] = os.getenv("CLERK_ISSUER") or _clerk_issuer_from_publishable_key()
+    clerk_audience: Optional[str] = os.getenv("CLERK_AUDIENCE")
+    clerk_jwks_url: Optional[str] = os.getenv("CLERK_JWKS_URL") or (
+        f"{clerk_issuer}/.well-known/jwks.json" if clerk_issuer else None
+    )
+    clerk_jwt_public_key: Optional[str] = os.getenv("CLERK_JWT_PUBLIC_KEY")
+
+    # Retention is an operational control; a worker must use these values to
+    # purge expired PHI.  Zero is never accepted outside development/test.
+    phi_audio_retention_days: int = int(os.getenv("PHI_AUDIO_RETENTION_DAYS", "30"))
+    phi_transcript_retention_days: int = int(os.getenv("PHI_TRANSCRIPT_RETENTION_DAYS", "2555"))
+    audit_retention_days: int = int(os.getenv("AUDIT_RETENTION_DAYS", "2555"))
+    # Production audit events are written to a permission-restricted rotating
+    # file that infrastructure must ship to its append-only audit archive.
+    audit_log_path: Optional[Path] = (
+        Path(os.getenv("AUDIT_LOG_PATH")) if os.getenv("AUDIT_LOG_PATH") else None
+    )
 
 
 settings = Settings()

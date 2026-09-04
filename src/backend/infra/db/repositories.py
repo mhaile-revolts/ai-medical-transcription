@@ -28,6 +28,10 @@ class EncounterRepository(ABC):
     def save(self, encounter: ClinicalEncounter) -> None:
         raise NotImplementedError
 
+    @abstractmethod
+    def delete(self, encounter_id: UUID) -> None:
+        raise NotImplementedError
+
 
 class ClinicalNoteRepository(ABC):
     @abstractmethod
@@ -42,6 +46,10 @@ class ClinicalNoteRepository(ABC):
     def save(self, note: ClinicalNote) -> None:
         raise NotImplementedError
 
+    @abstractmethod
+    def delete_by_encounter(self, encounter_id: UUID) -> None:
+        raise NotImplementedError
+
 
 class TranscriptionJobRepository(ABC):
     @abstractmethod
@@ -50,4 +58,12 @@ class TranscriptionJobRepository(ABC):
 
     @abstractmethod
     def save(self, job: TranscriptJob) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def list_all(self) -> Iterable[TranscriptJob]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def delete(self, job_id: UUID) -> None:
         raise NotImplementedError

@@ -70,6 +70,21 @@ class SqlClinicalNoteRepository(ClinicalNoteRepository):  # pragma: no cover - n
         finally:
             session.close()
 
+    def delete_by_encounter(self, encounter_id: UUID) -> None:
+        session = self._session_factory()
+        try:
+            session.query(ClinicalNoteORM).filter(
+                ClinicalNoteORM.encounter_id == encounter_id,
+                ClinicalNoteORM.tenant_id == get_current_tenant(),
+            ).delete()
+            session.commit()
+            from src.backend.services.encounters.service import encounter_service
+            for note_id, note in list(encounter_service._notes.items()):  # type: ignore[attr-defined]
+                if note.encounter_id == encounter_id and note.tenant_id == get_current_tenant():
+                    encounter_service._notes.pop(note_id, None)  # type: ignore[attr-defined]
+        finally:
+            session.close()
+
 
 class SqlTranscriptionJobRepository(TranscriptionJobRepository):  # pragma: no cover - not wired yet
     def __init__(self, session_factory: SessionFactory) -> None:
@@ -106,5 +121,25 @@ class SqlTranscriptionJobRepository(TranscriptionJobRepository):  # pragma: no c
         except Exception:
             session.rollback()
             raise
+        finally:
+            session.close()
+
+    def list_all(self) -> Iterable[TranscriptJob]:
+        session = self._session_factory()
+        try:
+            rows = session.query(TranscriptJobORM).filter(
+                TranscriptJobORM.tenant_id == get_current_tenant()
+            ).all()
+            return [row.to_domain() for row in rows]
+        finally:
+            session.close()
+
+    def delete(self, job_id: UUID) -> None:
+        session = self._session_factory()
+        try:
+            row = session.get(TranscriptJobORM, job_id)
+            if row is not None and row.tenant_id == get_current_tenant():
+                session.delete(row)
+                session.commit()
         finally:
             session.close()
