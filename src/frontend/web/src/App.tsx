@@ -2,6 +2,7 @@ import { ClerkProvider, SignIn, SignUp, Show, useClerk } from "@clerk/react";
 import { publishableKeyFromHost } from "@clerk/react/internal";
 import { dark } from "@clerk/themes";
 import { BrowserRouter, Routes, Route, Navigate, Link } from "react-router-dom";
+import type { ReactNode } from "react";
 import { EncountersListPage } from "./components/EncountersListPage";
 import { EncounterDetailPage } from "./components/EncounterDetailPage";
 
@@ -23,16 +24,16 @@ const appearance = {
     logoImageUrl: `${window.location.origin}/logo.svg`,
   },
   variables: {
-    colorPrimary: "#38bdf8",
-    colorForeground: "#f8fafc",
-    colorMutedForeground: "#94a3b8",
-    colorBackground: "#0f172a",
-    colorInput: "#1e293b",
-    colorInputForeground: "#f8fafc",
-    colorDanger: "#fb7185",
-    colorNeutral: "#475569",
-    fontFamily: "system-ui, sans-serif",
-    borderRadius: "0.75rem",
+    colorPrimary: "#147d78",
+    colorForeground: "#19343a",
+    colorMutedForeground: "#6c8588",
+    colorBackground: "#fbfdfc",
+    colorInput: "#fbfdfc",
+    colorInputForeground: "#19343a",
+    colorDanger: "#ae5b63",
+    colorNeutral: "#d5e6e1",
+    fontFamily: '"Plus Jakarta Sans", sans-serif',
+    borderRadius: "0.65rem",
   },
 };
 
@@ -61,7 +62,7 @@ function AccountPage() {
   );
 }
 
-function Protected({ children }: { children: React.ReactNode }) {
+function Protected({ children }: { children: ReactNode }) {
   return (
     <>
       <Show when="signed-in">{children}</Show>
