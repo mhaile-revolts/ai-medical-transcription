@@ -187,11 +187,6 @@ async def update_encounter_note(
         editor_id=str(current_user.id),
         finalize=payload.finalize,
     )
-    # Persist updated encounter/note via repositories; the in-memory service
-    # already mutated its state, so we simply save current objects.
-    encounter_repository.save(encounter)
-    clinical_note_repository.save(note)
-
     audit_service.log_event(
         action="update_encounter_note",
         resource_type="clinical_encounter",

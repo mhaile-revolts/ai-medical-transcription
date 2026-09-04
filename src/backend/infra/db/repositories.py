@@ -47,3 +47,7 @@ class TranscriptionJobRepository(ABC):
     @abstractmethod
     def get(self, job_id: UUID) -> Optional[TranscriptJob]:
         raise NotImplementedError
+
+    @abstractmethod
+    def save(self, job: TranscriptJob) -> None:
+        raise NotImplementedError

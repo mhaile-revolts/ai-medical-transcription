@@ -20,8 +20,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
+# Run the API and migrations without root privileges.
+RUN useradd --create-home --uid 10001 clinic \
+    && chown -R clinic:clinic /app
+USER clinic
+
 # Expose FastAPI default port
 EXPOSE 8000
 
-# Run the FastAPI app with uvicorn
-CMD ["uvicorn", "src.backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Apply schema migrations before accepting traffic. Startup still verifies the
+# exact revision and fails closed if migration or database readiness fails.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn src.backend.main:app --host 0.0.0.0 --port 8000"]

@@ -4,8 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, String, Text
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy import Boolean, DateTime, String, Text, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.backend.infra.db.models import Base
@@ -14,8 +13,8 @@ from src.backend.infra.db.models import Base
 class ClinicalNoteORM(Base):  # pragma: no cover - not wired yet
     __tablename__ = "clinical_notes"
 
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
-    encounter_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False, index=True)
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    encounter_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_by: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -79,7 +78,7 @@ class ClinicalNoteORM(Base):  # pragma: no cover - not wired yet
 class TranscriptJobORM(Base):  # pragma: no cover - not wired yet
     __tablename__ = "transcription_jobs"
 
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False)
     audio_url: Mapped[str] = mapped_column(String, nullable=False)

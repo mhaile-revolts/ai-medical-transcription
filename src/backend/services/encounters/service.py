@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from src.backend.domain.models.clinical_encounter import ClinicalEncounter, EncounterStatus
 from src.backend.domain.models.clinical_note import ClinicalNote, ClinicalNoteSection
 from src.backend.tenancy import get_current_tenant
+from src.backend.config import settings
 
 
 class InMemoryEncounterService:
@@ -40,9 +41,19 @@ class InMemoryEncounterService:
             tenant_id=get_current_tenant(),
         )
         self._encounters[encounter_id] = encounter
+        if self._durable():
+            from src.backend.infra.db.inmemory import encounter_repository
+            encounter_repository.save(encounter)
         return encounter
 
+    @staticmethod
+    def _durable() -> bool:
+        return settings.app_mode != "demo" or settings.use_sql_repos
+
     def get_encounter(self, encounter_id: UUID) -> Optional[ClinicalEncounter]:
+        if self._durable():
+            from src.backend.infra.db.inmemory import encounter_repository
+            return encounter_repository.get(encounter_id)
         enc = self._encounters.get(encounter_id)
         if enc is None:
             return None
@@ -51,7 +62,9 @@ class InMemoryEncounterService:
         return enc
 
     def attach_job(self, encounter_id: UUID, job_id: UUID) -> ClinicalEncounter:
-        encounter = self._encounters[encounter_id]
+        encounter = self.get_encounter(encounter_id)
+        if encounter is None:
+            raise KeyError(encounter_id)
         if encounter.tenant_id != get_current_tenant():
             raise KeyError("Encounter does not belong to current tenant")
         if job_id not in encounter.transcription_job_ids:
@@ -59,6 +72,9 @@ class InMemoryEncounterService:
             if encounter.status == EncounterStatus.CREATED:
                 encounter.status = EncounterStatus.IN_PROGRESS
             self._encounters[encounter_id] = encounter
+            if self._durable():
+                from src.backend.infra.db.inmemory import encounter_repository
+                encounter_repository.save(encounter)
         return encounter
 
     # Notes
@@ -71,6 +87,10 @@ class InMemoryEncounterService:
         join instead.
         """
 
+        if self._durable():
+            from src.backend.infra.db.inmemory import encounter_repository
+            return next((e for e in encounter_repository.list_by_filters()
+                         if job_id in e.transcription_job_ids), None)
         current_tenant = get_current_tenant()
         for encounter in self._encounters.values():
             if encounter.tenant_id != current_tenant:
@@ -134,19 +154,28 @@ class InMemoryEncounterService:
             note.plan.text = plan
 
         self._notes[note.id] = note
+        if self._durable():
+            from src.backend.infra.db.inmemory import clinical_note_repository
+            clinical_note_repository.save(note)
 
         # Optionally advance encounter status when a note exists
-        encounter = self._encounters.get(encounter_id)
+        encounter = self.get_encounter(encounter_id)
         if encounter is not None:
             if finalize:
                 encounter.status = EncounterStatus.FINALIZED
             elif encounter.status in {EncounterStatus.CREATED, EncounterStatus.IN_PROGRESS}:
                 encounter.status = EncounterStatus.READY_FOR_REVIEW
             self._encounters[encounter_id] = encounter
+            if self._durable():
+                from src.backend.infra.db.inmemory import encounter_repository
+                encounter_repository.save(encounter)
 
         return note
 
     def get_note(self, note_id: UUID) -> Optional[ClinicalNote]:
+        if self._durable():
+            from src.backend.infra.db.inmemory import clinical_note_repository
+            return clinical_note_repository.get(note_id)
         note = self._notes.get(note_id)
         if note is None:
             return None
@@ -155,6 +184,9 @@ class InMemoryEncounterService:
         return note
 
     def _find_note_for_encounter(self, encounter_id: UUID) -> Optional[ClinicalNote]:
+        if self._durable():
+            from src.backend.infra.db.inmemory import clinical_note_repository
+            return clinical_note_repository.get_by_encounter(encounter_id)
         current_tenant = get_current_tenant()
         for note in self._notes.values():
             if note.tenant_id != current_tenant:

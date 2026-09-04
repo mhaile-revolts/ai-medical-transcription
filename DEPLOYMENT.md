@@ -16,10 +16,11 @@ It focuses on the FastAPI backend and the React frontend in `src/frontend/web`.
 
 - FastAPI app: `src/backend/main.py` → `src.backend.main:app`
 - Persistence:
-  - In‑memory by default (dev/tests).
-  - Optional SQLAlchemy + DB when `USE_SQL_REPOS=true` and `DATABASE_URL` is set.
+  - Set `APP_MODE=demo` explicitly for in-memory development/testing.
+  - Other modes require a durable PostgreSQL `DATABASE_URL`.
 - Storage:
-  - Local filesystem via `AUDIO_UPLOAD_DIR` (default `uploads/`).
+  - Durable mode stores private audio blobs in PostgreSQL; demo uses
+    `AUDIO_UPLOAD_DIR` (default `uploads/`).
 - Security:
   - API key auth via `ENABLE_API_AUTH` + `API_KEYS`.
   - Basic RBAC (clinician/admin) and audit logging.
@@ -60,7 +61,9 @@ Key settings:
   - `REQUIRE_ON_PREM_ONLY` – `"true"` to signal that deployments must avoid external SaaS/cloud dependencies where possible; enforcement is implemented in individual backends and should be combined with infra controls.
 
 - **Audio storage**
-  - `AUDIO_UPLOAD_DIR` – directory for uploaded audio (default: `uploads`).
+  - Durable mode stores private audio in PostgreSQL and exposes only opaque
+    `db-audio://` references.
+  - `AUDIO_UPLOAD_DIR` – demo-mode upload directory (default: `uploads`).
 
 - **Security / auth**
   - `ENABLE_API_AUTH` – `"true"` or `"false"` (default `"false"`).
@@ -82,7 +85,10 @@ Key settings:
 - **Database / repositories**
   - `DATABASE_URL` – SQLAlchemy database URL. For Postgres (recommended beyond local dev):
     - `postgresql+psycopg2://USER:PASSWORD@HOST:5432/DBNAME`
-  - `USE_SQL_REPOS` – `"true"` to enable SQL‑backed repositories for encounters, notes, and jobs; otherwise in‑memory.
+  - `APP_MODE` – set `"demo"` only for ephemeral development. Durable mode
+    fails startup when `DATABASE_URL` is absent or unavailable.
+  - `USE_SQL_REPOS` – legacy compatibility switch to enable SQL repositories.
+  - Apply schema changes before application startup: `alembic upgrade head`.
 
 - **Optional MultiChain (private blockchain) audit logging**
   - `MULTICHAIN_ENABLED` – `"true"` to enable mirroring of audit events into a MultiChain stream.
@@ -107,7 +113,7 @@ Key settings:
 
 ### 3.1. Backend – dev
 
-> For dev you can run entirely in‑memory, or point at a local Postgres instance. The recommended DB for staging/pilot is Postgres.
+> For dev you can run explicitly in demo mode, or point at Postgres. Staging and pilot must use durable mode.
 
 1. **Install dependencies**
 
@@ -116,16 +122,24 @@ Key settings:
    pip install -r requirements.txt
    ```
 
-2. **(Optional) Configure Postgres for local dev**
+2. **Choose an explicit storage mode**
 
-   If you prefer Postgres without Docker, set for example:
+   For synthetic-data demo development:
 
    ```bash
-   export DATABASE_URL="postgresql+psycopg2://meduser:medpass@localhost:5432/med_transcription"
-   export USE_SQL_REPOS=true
+   export APP_MODE=demo
    ```
 
-   With `USE_SQL_REPOS=false` (default), encounters/notes/jobs are stored in memory only.
+   For durable development, set Postgres and apply migrations:
+
+   ```bash
+   export APP_MODE=durable
+   export DATABASE_URL="postgresql+psycopg2://meduser:medpass@localhost:5432/med_transcription"
+   alembic upgrade head
+   ```
+
+   Durable startup fails if the database is unreachable or not at the required
+   migration revision.
 
 2. **Run tests (optional but recommended)**
 
@@ -142,8 +156,7 @@ Key settings:
    By default:
 
    - `ENABLE_API_AUTH=false` → no auth required.
-   - `USE_SQL_REPOS=false` → in‑memory storage for encounters/notes/jobs.
-   - `AUDIO_UPLOAD_DIR=uploads` in the project root.
+   - `APP_MODE=demo` → in-memory records and `AUDIO_UPLOAD_DIR=uploads`.
    - Multitenancy: if `X-Tenant-ID` is omitted, all requests use the "default" tenant.
 
 ### 3.2. Frontend – dev
@@ -225,24 +238,26 @@ Staging should mirror pilot as closely as possible, but use only synthetic or de
 
    ```bash
    export DATABASE_URL="postgresql+psycopg2://user:password@host:5432/clinic_mvp_staging"
-   export USE_SQL_REPOS=true
+   export APP_MODE=durable
 
    export ENABLE_API_AUTH=true
    export API_KEYS="staging-key-1,staging-key-2"
 
-   export AUDIO_UPLOAD_DIR=/var/lib/clinic-mvp-staging/uploads
    export CORS_ALLOW_ORIGINS="https://staging-clinic-ui.example.com"
+   alembic upgrade head
    ```
 
 3. **Run backend**
 
    - Use a process manager or container orchestration (e.g. systemd, Docker, Kubernetes) as you prefer.
+- The included Dockerfile and Compose backend command run `alembic upgrade head`
+  before Uvicorn. Compose also waits for PostgreSQL's health check first.
    - On startup:
      - `@app.on_event("startup")` calls `init_sql_repositories()`.
      - This:
        - Connects to `DATABASE_URL`.
-       - Calls `Base.metadata.create_all(engine)` for `encounters`, `clinical_notes`, `transcription_jobs`.
-       - Swaps repository singletons to their SQL implementations.
+      - Verifies connectivity and the Alembic schema revision.
+      - Wires SQL repositories and private database-backed audio storage.
    - If `MULTICHAIN_ENABLED=true` and the RPC variables are set, audit events
      will also be mirrored into the configured MultiChain stream.
 
@@ -318,18 +333,17 @@ This is where you must be careful: most work here is infra and policy, not code.
    - Run backend and DB in a **private network** (VPC/VNet), ideally single region.
    - Expose only the HTTPS API via a load balancer or API gateway.
    - Restrict DB access to app nodes only.
-   - Enable encryption at rest for DB and disk/volume where `AUDIO_UPLOAD_DIR` lives.
+   - Enable encryption at rest for PostgreSQL, including its private audio blobs.
 
 2. **Env variables (example)**
 
    ```bash
    export DATABASE_URL="postgresql+psycopg2://user:password@securedb:5432/clinic_mvp_pilot"
-   export USE_SQL_REPOS=true
+   export APP_MODE=durable
 
    export ENABLE_API_AUTH=true
    export API_KEYS="pilot-clinic-key-1,pilot-clinic-key-2"
 
-   export AUDIO_UPLOAD_DIR=/var/lib/clinic-mvp-pilot/uploads
    export MAX_UPLOAD_BYTES=$((20 * 1024 * 1024))    # e.g. 20 MiB if needed
    export MAX_WS_BYTES=$((20 * 1024 * 1024))
 
@@ -353,7 +367,7 @@ This is where you must be careful: most work here is infra and policy, not code.
 
    - Enable automated DB backups (e.g. daily snapshots).
    - Document a tested restore procedure (at least in staging).
-   - Consider periodic snapshots of `AUDIO_UPLOAD_DIR` as per retention policy.
+   - Include private audio blobs in database backup and restore tests.
 
 ### 5.2. Frontend – pilot
 
@@ -423,8 +437,9 @@ Before going live with real PHI:
   - Backend/API not reachable without auth.
 
 - [ ] **Data persistence**
-  - `USE_SQL_REPOS=true` and `DATABASE_URL` set.
-  - Encounters, notes, and jobs persist through restarts.
+  - `APP_MODE=durable`, `DATABASE_URL` set, and `alembic upgrade head` applied.
+  - Encounters, notes, jobs, conversation sessions, users, and private audio
+    persist through restarts.
   - Backups configured and restore tested in staging.
 
 - [ ] **Security**

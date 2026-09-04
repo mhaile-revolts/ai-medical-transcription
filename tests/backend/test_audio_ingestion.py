@@ -36,11 +36,15 @@ async def test_upload_audio_creates_transcription_job():
 
 def test_live_transcription_websocket():
     with TestClient(app) as client:
-        with client.websocket_connect("/api/v1/audio/ws") as websocket:
+        with client.websocket_connect(
+            "/api/v1/audio/ws", headers={"X-Tenant-ID": "clinic-websocket"}
+        ) as websocket:
             websocket.send_bytes(b"hello")
             message = websocket.receive_json()
             # Ask server to finalize and close cleanly to avoid runtime errors on shutdown.
             websocket.send_text("stop")
+            final = websocket.receive_json()
 
             assert "partial_text" in message
             assert message["total_bytes"] == len(b"hello")
+            assert final["job"]["tenant_id"] == "clinic-websocket"

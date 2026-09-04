@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Iterable, Optional
+from typing import Any, Iterable, Optional
 from uuid import UUID
 
 from src.backend.domain.models.clinical_encounter import ClinicalEncounter, EncounterStatus
@@ -73,11 +73,32 @@ class InMemoryClinicalNoteRepository(ClinicalNoteRepository):
 
 class InMemoryTranscriptionJobRepository(TranscriptionJobRepository):
     def get(self, job_id: UUID) -> Optional[TranscriptJob]:
-        job = transcription_service.get_job(job_id)
-        # transcription_service.get_job already scopes by tenant; no extra check.
+        job = transcription_service._jobs.get(job_id)  # type: ignore[attr-defined]
+        if job is None or job.tenant_id != get_current_tenant():
+            return None
         return job
 
+    def save(self, job: TranscriptJob) -> None:
+        transcription_service._jobs[job.id] = job  # type: ignore[attr-defined]
 
-encounter_repository: EncounterRepository = InMemoryEncounterRepository()
-clinical_note_repository: ClinicalNoteRepository = InMemoryClinicalNoteRepository()
-transcription_job_repository: TranscriptionJobRepository = InMemoryTranscriptionJobRepository()
+
+class RepositoryProxy:
+    """Stable import-time repository handle.
+
+    Route modules import repositories during application construction.  Mutating
+    a module global later does not update those imports, so a forwarding proxy is
+    used to make bootstrap switches visible to every already-imported route.
+    """
+    def __init__(self, target: Any) -> None:
+        self.target = target
+
+    def set_target(self, target: Any) -> None:
+        self.target = target
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.target, name)
+
+
+encounter_repository = RepositoryProxy(InMemoryEncounterRepository())
+clinical_note_repository = RepositoryProxy(InMemoryClinicalNoteRepository())
+transcription_job_repository = RepositoryProxy(InMemoryTranscriptionJobRepository())

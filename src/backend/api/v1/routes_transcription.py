@@ -8,7 +8,7 @@ from pydantic import BaseModel, HttpUrl
 
 from src.backend.domain.models.transcription_job import TranscriptJob
 from src.backend.services.transcription.service import transcription_service
-from src.backend.services.nlp.service import nlp_service
+from src.backend.services.nlp import service as nlp_service_module
 from src.backend.domain.nlp.models import ClinicalEntities, SOAPNote
 from src.backend.domain.nlp.coding_models import CodeAssignment, BillingRiskSummary
 from src.backend.domain.nlp.models import TranscriptSegment
@@ -99,7 +99,7 @@ async def analyze_transcription(job_id: UUID) -> AnalyzeTranscriptionResponse:
     if not job.result_text:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transcription result not available yet")
 
-    entities, soap = nlp_service.extract_and_summarize(job.result_text)
+    entities, soap = nlp_service_module.nlp_service.extract_and_summarize(job.result_text)
     codes, billing_risk = coding_orchestrator.assign_codes(entities, soap)
     segments = relevance_classifier.classify_segments(job.result_text)
     segments = emotion_classifier.classify_segments(segments)
@@ -155,7 +155,7 @@ async def export_transcription_fhir(job_id: UUID) -> FHIRExportResponse:
     if not job.result_text:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transcription result not available yet")
 
-    entities, soap = nlp_service.extract_and_summarize(job.result_text)
+    entities, soap = nlp_service_module.nlp_service.extract_and_summarize(job.result_text)
     bundle = demo_fhir_exporter.build_fhir_bundle(job_id=job_id, entities=entities, soap_note=soap)
 
     audit_service.log_event(

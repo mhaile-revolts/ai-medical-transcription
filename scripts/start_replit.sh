@@ -8,7 +8,9 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-python -m uvicorn src.backend.main:app --host 127.0.0.1 --port 8000 &
+# The preview is an explicit synthetic-data demo. Deployments must omit this
+# override and provide DATABASE_URL after running Alembic migrations.
+APP_MODE=demo python -m uvicorn src.backend.main:app --host 127.0.0.1 --port 8000 &
 backend_pid=$!
 
 cd src/frontend/web

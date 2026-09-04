@@ -22,6 +22,16 @@ def get_current_tenant() -> str:
     return _current_tenant.get()
 
 
+def set_current_tenant(tenant_id: str):
+    """Set tenant context for non-HTTP dependency flows such as WebSockets."""
+    return _current_tenant.set(tenant_id or "default")
+
+
+def reset_current_tenant(token) -> None:
+    """Restore the tenant context captured before ``set_current_tenant``."""
+    _current_tenant.reset(token)
+
+
 async def tenant_dependency(
     x_tenant_id: Optional[str] = Header(None, alias="X-Tenant-ID"),
 ) -> str:

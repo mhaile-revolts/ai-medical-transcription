@@ -83,6 +83,7 @@ class SqlEncounterRepository(EncounterRepository):  # pragma: no cover - skeleto
                 existing.patient_id = encounter.patient_id
                 existing.status = encounter.status.value
                 existing.title = encounter.title
+                existing.assigned_scribe_id = encounter.assigned_scribe_id
                 existing.transcription_job_ids = ",".join(
                     str(j) for j in encounter.transcription_job_ids
                 ) if encounter.transcription_job_ids else None

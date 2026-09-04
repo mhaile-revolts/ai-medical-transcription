@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Optional
 from uuid import UUID, uuid4
 
@@ -69,7 +69,7 @@ class InMemoryTranscriptionService:
         job_id = uuid4()
         job = TranscriptJob(
             id=job_id,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             status=TranscriptJobStatus.PENDING,
             audio_url=audio_url,
             language_code=language_code,
@@ -78,7 +78,8 @@ class InMemoryTranscriptionService:
             translated_text=None,
             tenant_id=get_current_tenant(),
         )
-        self._jobs[job_id] = job
+        from src.backend.infra.db.inmemory import transcription_job_repository
+        transcription_job_repository.save(job)
         return job
 
     def process_job(self, job_id: UUID) -> TranscriptJob:
@@ -90,34 +91,36 @@ class InMemoryTranscriptionService:
         return self._run_job(job_id)
 
     def _run_job(self, job_id: UUID) -> TranscriptJob:
-        job = self._jobs[job_id]
+        from src.backend.infra.db.inmemory import transcription_job_repository
+        job = transcription_job_repository.get(job_id)
+        if job is None:
+            raise KeyError(job_id)
         job.status = TranscriptJobStatus.PROCESSING
+        transcription_job_repository.save(job)
 
-        base_text = self._asr_backend.transcribe(
-            audio_url=str(job.audio_url),
-            language_code=job.language_code,
-        )
-        translated_text = None
-        if job.target_language:
-            translated_text = self._translation_backend.translate(
-                text=base_text,
-                target_language=job.target_language,
-                source_language=job.language_code,
+        try:
+            from src.backend.infra.storage.audio import processing_path
+            with processing_path(str(job.audio_url)) as audio_path:
+                base_text = self._asr_backend.transcribe(
+                    audio_url=audio_path, language_code=job.language_code,
+                )
+            job.result_text = base_text
+            job.translated_text = (
+                self._translation_backend.translate(text=base_text, target_language=job.target_language,
+                                                    source_language=job.language_code)
+                if job.target_language else None
             )
-
-        job.result_text = base_text
-        job.translated_text = translated_text
-        job.status = TranscriptJobStatus.COMPLETED
-        self._jobs[job_id] = job
-        return job
+            job.status = TranscriptJobStatus.COMPLETED
+            transcription_job_repository.save(job)
+            return job
+        except Exception:
+            job.status = TranscriptJobStatus.FAILED
+            transcription_job_repository.save(job)
+            raise
 
     def get_job(self, job_id: UUID) -> Optional[TranscriptJob]:
-        job = self._jobs.get(job_id)
-        if job is None:
-            return None
-        if job.tenant_id != get_current_tenant():
-            return None
-        return job
+        from src.backend.infra.db.inmemory import transcription_job_repository
+        return transcription_job_repository.get(job_id)
 
 
 # Default singleton instance for simple use in routers during early stages.

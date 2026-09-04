@@ -47,7 +47,12 @@ class Settings:
     nlp_coding_backend: str = os.getenv("NLP_CODING_BACKEND", "demo")
     nlp_soap_backend: str = os.getenv("NLP_SOAP_BACKEND", "demo")
 
-    # Directory where uploaded audio files are stored.
+    # ``demo`` is the only mode permitted to use ephemeral local state.
+    # Durable mode is deliberately the default: a missing database must stop
+    # startup rather than silently accepting PHI into process memory.
+    app_mode: str = os.getenv("APP_MODE", "durable").lower()
+
+    # Directory where uploaded audio files are stored (demo mode only).
     audio_upload_dir: Path = Path(os.getenv("AUDIO_UPLOAD_DIR", "uploads"))
 
     # Optional database configuration for SQL-backed repositories.

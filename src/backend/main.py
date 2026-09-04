@@ -37,7 +37,7 @@ async def startup_event():
     database), this is a no-op and the in-memory repositories remain active.
     """
 
-    if settings.use_sql_repos and settings.database_url:
+    if settings.app_mode != "demo" or settings.use_sql_repos:
         init_sql_repositories()
 
 

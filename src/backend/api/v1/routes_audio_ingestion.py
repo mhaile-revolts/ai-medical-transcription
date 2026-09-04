@@ -16,7 +16,7 @@ from src.backend.services.encounters.service import encounter_service
 from src.backend.infra.storage.audio import audio_storage_backend
 from src.backend.services.audit.service import audit_service
 from src.backend.security import get_api_key
-from src.backend.tenancy import tenant_dependency
+from src.backend.tenancy import tenant_dependency, reset_current_tenant, set_current_tenant
 
 router = APIRouter(
     prefix="/audio",
@@ -70,7 +70,9 @@ async def upload_audio(
     # Fall back to a UUID-based filename if the client did not supply one.
     filename = Path(file.filename).name if file.filename else None
     dest_name = filename or (f"{uuid4()}.{suffix}" if suffix else str(uuid4()))
-    dest_ref = audio_storage_backend.save_file(content, suffix=dest_name)
+    # Resolve through the module at request time so startup wiring is honored.
+    from src.backend.infra.storage import audio as audio_module
+    dest_ref = audio_module.audio_storage_backend.save_file(content, suffix=dest_name)
 
     job = transcription_service.create_job(
         audio_url=str(dest_ref),
@@ -133,6 +135,7 @@ async def live_transcription(websocket: WebSocket) -> None:
 
     # Extract optional query parameters for language and session association.
     qp = websocket.query_params
+    tenant_token = set_current_tenant(websocket.headers.get("x-tenant-id", "default"))
     language_code = qp.get("language_code")
     target_language = qp.get("target_language")
     session_id: Optional[UUID] = None
@@ -145,11 +148,15 @@ async def live_transcription(websocket: WebSocket) -> None:
             session_id = None
 
     await websocket.accept()
-    upload_dir = settings.audio_upload_dir
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    temp_path = upload_dir / f"ws-{uuid4()}.wav"
+    # Use an opaque durable reference outside demo mode.  Routes import the
+    # storage singleton before startup, so resolve it at runtime below.
+    from src.backend.infra.storage import audio as audio_module
+    temp_path = str(settings.audio_upload_dir / f"ws-{uuid4()}.wav")
+    if settings.app_mode != "demo":
+        temp_path = audio_module.audio_storage_backend.save_file(b"", suffix=f"ws-{uuid4()}.wav")
 
     total_bytes = 0
+    keep_audio = False
     try:
         while True:
             message = await websocket.receive()
@@ -169,7 +176,7 @@ async def live_transcription(websocket: WebSocket) -> None:
                     break
 
                 # Append chunk to temp audio file
-                audio_storage_backend.append_file(str(temp_path), chunk)
+                audio_module.audio_storage_backend.append_file(str(temp_path), chunk)
 
                 # Default partial text is a simple byte counter
                 partial_text = f"Received {total_bytes} bytes of audio (demo)"
@@ -179,7 +186,10 @@ async def live_transcription(websocket: WebSocket) -> None:
                 # continues.
                 try:
                     asr_backend = transcription_service._asr_backend  # type: ignore[attr-defined]
-                    transcript = asr_backend.transcribe(str(temp_path), language_code=language_code)
+                    with audio_module.processing_path(str(temp_path)) as partial_path:
+                        transcript = asr_backend.transcribe(
+                            partial_path, language_code=language_code
+                        )
                     if transcript:
                         partial_text = transcript
                 except Exception:  # pragma: no cover - defensive around external deps
@@ -218,12 +228,15 @@ async def live_transcription(websocket: WebSocket) -> None:
                         await websocket.close(code=1009)
                         break
 
-                    audio_storage_backend.append_file(str(temp_path), chunk)
+                    audio_module.audio_storage_backend.append_file(str(temp_path), chunk)
 
                     partial_text = f"Received {total_bytes} bytes of audio (demo)"
                     try:
                         asr_backend = transcription_service._asr_backend  # type: ignore[attr-defined]
-                        transcript = asr_backend.transcribe(str(temp_path), language_code=language_code)
+                        with audio_module.processing_path(str(temp_path)) as partial_path:
+                            transcript = asr_backend.transcribe(
+                                partial_path, language_code=language_code
+                            )
                         if transcript:
                             partial_text = transcript
                     except Exception:  # pragma: no cover - defensive around external deps
@@ -246,6 +259,7 @@ async def live_transcription(websocket: WebSocket) -> None:
                             language_code=language_code,
                             target_language=target_language,
                         )
+                        keep_audio = True
                         if session_id is not None:
                             session = conversation_service.get_session(session_id)
                             if session is not None:
@@ -270,5 +284,6 @@ async def live_transcription(websocket: WebSocket) -> None:
         # Client disconnected; nothing else to do for this prototype.
         return
     finally:
-        if temp_path.exists():
-            audio_storage_backend.delete_file(str(temp_path))
+        if not keep_audio:
+            audio_module.audio_storage_backend.delete_file(str(temp_path))
+        reset_current_tenant(tenant_token)

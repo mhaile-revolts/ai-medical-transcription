@@ -86,3 +86,25 @@ class SqlTranscriptionJobRepository(TranscriptionJobRepository):  # pragma: no c
             return orm.to_domain()
         finally:
             session.close()
+
+    def save(self, job: TranscriptJob) -> None:
+        session = self._session_factory()
+        try:
+            existing = session.get(TranscriptJobORM, job.id)
+            if existing is None:
+                session.add(TranscriptJobORM.from_domain(job))
+            else:
+                existing.created_at = job.created_at
+                existing.status = job.status.value
+                existing.audio_url = str(job.audio_url)
+                existing.language_code = job.language_code
+                existing.target_language = job.target_language
+                existing.result_text = job.result_text
+                existing.translated_text = job.translated_text
+                existing.tenant_id = job.tenant_id
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
