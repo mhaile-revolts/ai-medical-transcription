@@ -21,6 +21,7 @@ import {
 } from '@clerk/expo';
 import { useSignIn } from '@clerk/expo/legacy';
 import { tokenCache } from './tokenCache';
+import { BrandMark } from './components';
 
 // Base URL for the backend API. Can be overridden via EXPO_PUBLIC_API_BASE_URL at build time.
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL as string | undefined) ?? 'http://localhost:8000';
@@ -158,8 +159,10 @@ function MobileSignIn() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="auto" />
       <View style={styles.signInContainer}>
-        <Text style={styles.title}>AI Medical Transcription</Text>
-        <Text style={styles.subtitle}>Sign in with your individual clinic account</Text>
+        <BrandMark />
+        <Text style={styles.eyebrow}>OCHIN · CLINICAL DOCUMENTATION</Text>
+        <Text style={styles.title}>A quieter way to document care.</Text>
+        <Text style={styles.subtitle}>Sign in to Clinic Scribe with your individual clinician account. Patient recording stays locked until every safety check is complete.</Text>
         {secondFactorStrategy ? (
           <>
             <Text style={styles.label}>Verification code</Text>
@@ -167,6 +170,7 @@ function MobileSignIn() {
               Enter the code from your {secondFactorStrategy.replace('_', ' ')} method.
             </Text>
             <TextInput
+              accessibilityLabel="Verification code"
               style={styles.input}
               value={verificationCode}
               onChangeText={setVerificationCode}
@@ -185,6 +189,7 @@ function MobileSignIn() {
           <>
             <Text style={styles.label}>Email</Text>
             <TextInput
+              accessibilityLabel="Email address"
               style={styles.input}
               value={email}
               onChangeText={setEmail}
@@ -194,6 +199,7 @@ function MobileSignIn() {
             />
             <Text style={styles.label}>Password</Text>
             <TextInput
+              accessibilityLabel="Password"
               style={styles.input}
               value={password}
               onChangeText={setPassword}
@@ -253,6 +259,7 @@ function AuthenticatedApp() {
   const [exportStatus, setExportStatus] = useState<EHRExportStatus | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const patientLookupRequest = useRef(0);
   const encounterConfirmRequest = useRef(0);
 
@@ -771,8 +778,16 @@ function AuthenticatedApp() {
     <SafeAreaView style={styles.container}>
       <StatusBar style="auto" />
       <ScrollView contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>AI Medical Transcription</Text>
-        <Text style={styles.subtitle}>Mobile Client (Android / iOS)</Text>
+        <View style={styles.topbar}>
+          <View style={styles.brandLine}><BrandMark /><View><Text style={styles.brandName}>Clinic Scribe</Text><Text style={styles.brandMeta}>OCHIN Epic companion</Text></View></View>
+          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Sign out" style={styles.signOutCompact} onPress={() => signOut()}><Text style={styles.signOutText}>Sign out</Text></TouchableOpacity>
+        </View>
+        <View style={styles.hero}>
+          <Text style={styles.eyebrow}>SAFE DOCUMENTATION · {smartStatus.authorized ? 'CONNECTED' : 'ACTION NEEDED'}</Text>
+          <Text style={styles.title}>Ready for the visit</Text>
+          <Text style={styles.subtitle}>Each step protects patient identity and keeps recording under your control.</Text>
+          <View style={styles.progress}>{[smartStatus.authorized, !!patient, !!localEncounterId, !!localEncounterId, recordingStatus === 'recording'].map((done, index) => <View key={index} style={[styles.progressBar, done && styles.progressDone]} />)}</View>
+        </View>
 
         {/* Individual session */}
         <View style={styles.section}>
@@ -791,10 +806,15 @@ function AuthenticatedApp() {
           </TouchableOpacity>
         </View>
 
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Toggle diagnostics" style={styles.diagnosticsToggle} onPress={() => setDiagnosticsOpen(!diagnosticsOpen)}>
+          <View><Text style={styles.diagnosticsTitle}>Diagnostics & developer tools</Text><Text style={styles.hint}>Backend health, audio URL jobs, and raw payloads</Text></View>
+          <Text style={styles.chevron}>{diagnosticsOpen ? '−' : '+'}</Text>
+        </TouchableOpacity>
+        {diagnosticsOpen && <>
         {/* Backend health */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Backend Health</Text>
-          {healthLoading && <ActivityIndicator size="small" color="#007AFF" />}
+          {healthLoading && <ActivityIndicator size="small" color="#176F64" />}
           {!healthLoading && healthError && <Text style={styles.errorText}>{healthError}</Text>}
           {!healthLoading && !healthError && health && (
             <View style={styles.card}>
@@ -871,6 +891,8 @@ function AuthenticatedApp() {
             </View>
           )}
         </View>
+
+        </>}
 
         {/* Record & upload audio from device */}
         <View style={styles.section}>
@@ -1053,7 +1075,7 @@ function AuthenticatedApp() {
               disabled={analysisLoading}
             >
               {analysisLoading ? (
-                <ActivityIndicator color="#007AFF" />
+                <ActivityIndicator color="#176F64" />
               ) : (
                 <Text style={styles.buttonSecondaryText}>Analyze Job</Text>
               )}
@@ -1159,7 +1181,7 @@ function MobileAuthGate() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.signInContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+          <ActivityIndicator size="large" color="#176F64" />
         </View>
       </SafeAreaView>
     );
@@ -1170,26 +1192,46 @@ function MobileAuthGate() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#F4F9F7',
   },
   scrollContent: {
-    padding: 24,
-    paddingBottom: 48,
+    padding: 18,
+    paddingBottom: 56,
+    maxWidth: 760,
+    alignSelf: 'center',
+    width: '100%',
   },
   signInContainer: {
     flex: 1,
     justifyContent: 'center',
     padding: 24,
+    maxWidth: 520,
+    alignSelf: 'center',
+    width: '100%',
+    backgroundColor: '#F4F9F7',
   },
+  topbar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 28 },
+  brandLine: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  brandName: { color: '#173A35', fontSize: 15, fontWeight: '800' },
+  brandMeta: { color: '#6C8780', fontSize: 10, marginTop: 2 },
+  signOutCompact: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  signOutText: { color: '#176F64', fontSize: 12, fontWeight: '800' },
+  hero: { marginBottom: 18 },
+  progress: { flexDirection: 'row', gap: 4, marginTop: 15 },
+  progressBar: { height: 4, flex: 1, borderRadius: 4, backgroundColor: '#DCEAE5' },
+  progressDone: { backgroundColor: '#23796D' },
+  eyebrow: { color: '#6C8780', fontSize: 10, fontWeight: '800', letterSpacing: 1.1, marginTop: 17, marginBottom: 8 },
   title: {
-    fontSize: 24,
+    fontSize: 28,
     fontWeight: '700',
     marginBottom: 4,
+    color: '#173A35',
   },
   subtitle: {
     fontSize: 14,
-    color: '#555',
+    color: '#6C8780',
     marginBottom: 16,
+    lineHeight: 21,
   },
   section: {
     marginBottom: 24,
@@ -1211,7 +1253,7 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#D8E9E3',
     borderRadius: 8,
     paddingHorizontal: 10,
     paddingVertical: 8,
@@ -1275,13 +1317,13 @@ const styles = StyleSheet.create({
     height: 22,
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#176F64',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 8,
   },
   checkboxChecked: {
-    backgroundColor: '#007AFF',
+    backgroundColor: '#176F64',
   },
   checkboxMark: {
     color: '#fff',
@@ -1294,14 +1336,14 @@ const styles = StyleSheet.create({
   },
   encounterOption: {
     backgroundColor: '#fff',
-    borderColor: '#ccc',
+    borderColor: '#D8E9E3',
     borderRadius: 8,
     borderWidth: 1,
     padding: 12,
     marginTop: 8,
   },
   encounterOptionSelected: {
-    borderColor: '#007AFF',
+    borderColor: '#176F64',
     borderWidth: 2,
   },
   successText: {
@@ -1320,7 +1362,7 @@ const styles = StyleSheet.create({
   },
   button: {
     marginTop: 16,
-    backgroundColor: '#007AFF',
+    backgroundColor: '#176F64',
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
@@ -1332,13 +1374,17 @@ const styles = StyleSheet.create({
   buttonSecondary: {
     marginTop: 8,
     borderWidth: 1,
-    borderColor: '#007AFF',
+    borderColor: '#176F64',
     borderRadius: 8,
     paddingVertical: 10,
     alignItems: 'center',
   },
   buttonSecondaryText: {
-    color: '#007AFF',
+    color: '#176F64',
     fontWeight: '600',
   },
+  lockLine: { color: '#6C8780', fontSize: 11, marginTop: 14, lineHeight: 16 },
+  diagnosticsToggle: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 16, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#D8E9E3', marginBottom: 15 },
+  diagnosticsTitle: { color: '#173A35', fontWeight: '800', fontSize: 13 },
+  chevron: { color: '#176F64', fontSize: 24, fontWeight: '300', paddingHorizontal: 10 },
 });
