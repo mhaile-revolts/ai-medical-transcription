@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Dict, Iterable, Optional
+from threading import Lock
 from uuid import UUID
 
 from src.backend.domain.models.ehr_connection import EHRConnection
 from src.backend.domain.models.ehr_message import EHRMessage
 from src.backend.infra.db.ehr_repositories import EHRConnectionRepository, EHRMessageRepository
 from src.backend.tenancy import get_current_tenant
+from src.backend.infra.db.inmemory import RepositoryProxy
 
 
 class InMemoryEHRConnectionRepository(EHRConnectionRepository):
@@ -50,6 +52,7 @@ class InMemoryEHRMessageRepository(EHRMessageRepository):
 
     def __init__(self) -> None:
         self._messages: Dict[UUID, EHRMessage] = {}
+        self._lock = Lock()
 
     def get(self, message_id: UUID) -> Optional[EHRMessage]:
         msg = self._messages.get(message_id)
@@ -69,6 +72,18 @@ class InMemoryEHRMessageRepository(EHRMessageRepository):
                 continue
             yield msg
 
+    def get_by_idempotency_key(self, idempotency_key: str) -> Optional[EHRMessage]:
+        current_tenant = get_current_tenant()
+        return next(
+            (
+                message
+                for message in self._messages.values()
+                if message.tenant_id == current_tenant
+                and message.idempotency_key == idempotency_key
+            ),
+            None,
+        )
+
     def save(self, message: EHRMessage) -> None:
         now = datetime.utcnow()
         if message.created_at is None:
@@ -76,7 +91,14 @@ class InMemoryEHRMessageRepository(EHRMessageRepository):
         message.updated_at = now
         self._messages[message.id] = message
 
+    def save_if_absent(self, message: EHRMessage) -> EHRMessage:
+        with self._lock:
+            existing = self.get_by_idempotency_key(message.idempotency_key)
+            if existing is not None:
+                return existing
+            self.save(message)
+            return message
 
-ehr_connection_repository: EHRConnectionRepository = InMemoryEHRConnectionRepository()
 
-ehr_message_repository: EHRMessageRepository = InMemoryEHRMessageRepository()
+ehr_connection_repository = RepositoryProxy(InMemoryEHRConnectionRepository())
+ehr_message_repository = RepositoryProxy(InMemoryEHRMessageRepository())

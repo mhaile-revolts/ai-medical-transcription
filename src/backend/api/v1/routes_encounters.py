@@ -16,7 +16,7 @@ from src.backend.services.transcription.service import transcription_service
 from src.backend.services.audit.service import audit_service
 from src.backend.services.nlp.service import nlp_service
 from src.backend.services.nlp.decision_support_service import decision_support_service
-from src.backend.security import get_api_key, get_current_user, ensure_can_view_encounter, ensure_can_edit_encounter
+from src.backend.security import get_api_key, get_current_user, ensure_can_view_encounter, ensure_can_edit_encounter, ensure_is_doctor
 from src.backend.infra.db.inmemory import (
     encounter_repository,
     clinical_note_repository,
@@ -173,6 +173,11 @@ async def update_encounter_note(
     payload: EncounterNoteUpdateRequest,
     current_user: User = Depends(get_current_user),
 ) -> ClinicalNote:
+    if payload.finalize:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Use the doctor-only finalize endpoint after reviewing the note",
+        )
     encounter = encounter_repository.get(encounter_id)
     if encounter is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")
@@ -237,6 +242,7 @@ async def finalize_encounter(
     payload: EncounterFinalizeRequest,
     current_user: User = Depends(get_current_user),
 ) -> ClinicalNote:
+    ensure_is_doctor(current_user)
     encounter = encounter_repository.get(encounter_id)
     if encounter is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")

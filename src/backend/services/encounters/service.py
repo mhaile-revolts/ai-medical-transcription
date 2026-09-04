@@ -131,10 +131,9 @@ class InMemoryEncounterService:
         now = datetime.now(timezone.utc)
 
         existing = self._find_note_for_encounter(encounter_id)
-        if existing is not None and existing.is_finalized and not finalize:
-            # Do not overwrite finalized notes when called in auto-update mode
-            # (e.g., from transcription analysis). The dedicated finalize endpoint
-            # should be used to change finalized notes.
+        if existing is not None and existing.is_finalized:
+            # Approved content is immutable. Any future amendment workflow must
+            # create a new note version and collect fresh doctor approval.
             return existing
 
         if existing is None:

@@ -10,7 +10,8 @@ from pydantic import BaseModel, HttpUrl
 from src.backend.domain.models.ehr_connection import EHRConnection
 from src.backend.domain.models.ehr_message import EHRMessage
 from src.backend.services.ehr.integration_service import ehr_integration_service
-from src.backend.security import get_api_key, get_current_user, ensure_is_admin
+from src.backend.security import get_api_key, get_current_user, ensure_is_admin, ensure_can_edit_encounter, ensure_is_doctor
+from src.backend.infra.db.inmemory import clinical_note_repository, encounter_repository
 from src.backend.tenancy import tenant_dependency, get_current_tenant
 from src.backend.domain.models.clinical_encounter import ClinicalEncounter, EncounterStatus
 from src.backend.services.encounters.service import encounter_service
@@ -53,6 +54,14 @@ class EHRMessageSummary(BaseModel):
     related_note_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
+    retry_count: int
+    last_error: Optional[str] = None
+    delivered_at: Optional[datetime] = None
+    next_retry_at: Optional[datetime] = None
+
+
+class ApprovedNoteExportRequest(BaseModel):
+    connection_id: Optional[UUID] = None
 
 
 class SmartPatientResponse(BaseModel):
@@ -131,7 +140,7 @@ async def list_messages(
     current_user=Depends(get_current_user),
 ) -> List[EHRMessageSummary]:
     ensure_is_admin(current_user)
-    statuses = (status_filter,) if status_filter else ("pending", "failed", "sent")
+    statuses = (status_filter,) if status_filter else ("pending", "failed", "delivered")
     messages: List[EHRMessage] = ehr_integration_service.list_messages_by_status(*statuses)
     return [
         EHRMessageSummary(
@@ -143,9 +152,66 @@ async def list_messages(
             related_note_id=m.related_note_id,
             created_at=m.created_at,
             updated_at=m.updated_at,
+            retry_count=m.retry_count,
+            last_error=m.last_error,
+            delivered_at=m.delivered_at,
+            next_retry_at=m.next_retry_at,
         )
         for m in messages
     ]
+
+
+@router.post("/encounters/{encounter_id}/approved-note", response_model=EHRMessageSummary)
+async def export_approved_note(
+    encounter_id: UUID,
+    payload: ApprovedNoteExportRequest,
+    current_user=Depends(get_current_user),
+) -> EHRMessageSummary:
+    ensure_is_doctor(current_user)
+    encounter = encounter_repository.get(encounter_id)
+    if encounter is None:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    ensure_can_edit_encounter(current_user, encounter.clinician_id)
+    note = clinical_note_repository.get_by_encounter(encounter_id)
+    connection = (
+        ehr_integration_service.get_connection(payload.connection_id)
+        if payload.connection_id
+        else next(
+            (
+                item for item in ehr_integration_service.list_active_connections()
+                if "ochin_note_write" in item.supported_capabilities
+            ),
+            None,
+        )
+    )
+    if note is None:
+        raise HTTPException(status_code=404, detail="Note not found")
+    if connection is None:
+        raise HTTPException(status_code=409, detail="No approved OCHIN note write connection is configured")
+    try:
+        message = await ehr_integration_service.export_approved_note(
+            connection=connection, encounter=encounter, note=note
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return EHRMessageSummary(**message.model_dump())
+
+
+@router.post("/messages/{message_id}/retry", response_model=EHRMessageSummary)
+async def retry_export(message_id: UUID, current_user=Depends(get_current_user)) -> EHRMessageSummary:
+    ensure_is_doctor(current_user)
+    message = ehr_integration_service.get_message(message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="EHR message not found")
+    encounter = encounter_repository.get(message.related_encounter_id) if message.related_encounter_id else None
+    if encounter is None:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    ensure_can_edit_encounter(current_user, encounter.clinician_id)
+    try:
+        retried = await ehr_integration_service.retry_message(message_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return EHRMessageSummary(**retried.model_dump())
 
 
 @router.get("/smart/patients/{patient_id}", response_model=SmartPatientResponse)

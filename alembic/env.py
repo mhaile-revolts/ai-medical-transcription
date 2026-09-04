@@ -7,6 +7,7 @@ from sqlalchemy import engine_from_config, pool
 
 from src.backend.infra.db.models import Base
 import src.backend.infra.db.models_notes_jobs  # register mapped tables
+import src.backend.infra.db.models_ehr  # register EHR outbox tables
 
 config = context.config
 database_url = os.getenv("DATABASE_URL")

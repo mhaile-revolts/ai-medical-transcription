@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 from typing import Any, Dict, List
 from uuid import UUID
 
 from src.backend.domain.models.clinical_encounter import ClinicalEncounter
+from src.backend.domain.models.clinical_note import ClinicalNote
 from src.backend.domain.nlp.models import ClinicalEntities, SOAPNote
 
 
@@ -106,3 +108,58 @@ def build_document_bundle(
         "entry": entries,
     }
     return bundle
+
+
+def build_ochin_document_reference(
+    *,
+    note: ClinicalNote,
+    encounter: ClinicalEncounter,
+    profile_url: str,
+    idempotency_key: str,
+) -> Dict[str, Any]:
+    """Map an approved note to the exact DocumentReference profile configured by OCHIN."""
+    if not encounter.external_patient_id or not encounter.external_encounter_id:
+        raise ValueError("Confirmed external Patient and Encounter references are required")
+    text = "\n\n".join(
+        (
+            f"Subjective\n{note.subjective.text}",
+            f"Objective\n{note.objective.text}",
+            f"Assessment\n{note.assessment.text}",
+            f"Plan\n{note.plan.text}",
+        )
+    )
+    return {
+        "resourceType": "DocumentReference",
+        "meta": {"profile": [profile_url]},
+        "identifier": [
+            {
+                "system": "urn:ai-medical-transcription:approved-note",
+                "value": idempotency_key,
+            }
+        ],
+        "status": "current",
+        "docStatus": "final",
+        "type": {
+            "coding": [
+                {
+                    "system": "http://loinc.org",
+                    "code": "11506-3",
+                    "display": "Progress note",
+                }
+            ]
+        },
+        "subject": {"reference": f"Patient/{encounter.external_patient_id}"},
+        "context": {
+            "encounter": [{"reference": f"Encounter/{encounter.external_encounter_id}"}]
+        },
+        "date": (note.reviewed_at or note.updated_at).isoformat(),
+        "content": [
+            {
+                "attachment": {
+                    "contentType": "text/plain",
+                    "data": base64.b64encode(text.encode("utf-8")).decode("ascii"),
+                    "title": "Doctor-approved visit note",
+                }
+            }
+        ],
+    }

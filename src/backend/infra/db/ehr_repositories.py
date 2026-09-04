@@ -42,5 +42,14 @@ class EHRMessageRepository(ABC):
         """List messages for the current tenant filtered by status."""
 
     @abstractmethod
+    def get_by_idempotency_key(self, idempotency_key: str) -> Optional[EHRMessage]:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_if_absent(self, message: EHRMessage) -> EHRMessage:
+        """Atomically persist a new idempotency key, or return its existing message."""
+        raise NotImplementedError
+
+    @abstractmethod
     def save(self, message: EHRMessage) -> None:
         raise NotImplementedError

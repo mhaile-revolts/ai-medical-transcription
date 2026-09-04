@@ -77,6 +77,13 @@ interface ConfirmedEncounter {
   id: string;
 }
 
+interface EHRExportStatus {
+  id: string;
+  status: 'pending' | 'delivered' | 'failed';
+  retry_count: number;
+  last_error?: string | null;
+}
+
 function MobileSignIn() {
   const { signIn, setActive, isLoaded } = useSignIn();
   const [email, setEmail] = useState('');
@@ -234,6 +241,10 @@ function AuthenticatedApp() {
   const [patientLoading, setPatientLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [patientError, setPatientError] = useState<string | null>(null);
+  const [doctorApproval, setDoctorApproval] = useState(false);
+  const [exportStatus, setExportStatus] = useState<EHRExportStatus | null>(null);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
   const patientLookupRequest = useRef(0);
   const encounterConfirmRequest = useRef(0);
 
@@ -264,6 +275,9 @@ function AuthenticatedApp() {
     setPatientLoading(false);
     setConfirmLoading(false);
     setUploadError(null);
+    setDoctorApproval(false);
+    setExportStatus(null);
+    setExportError(null);
   };
 
   const handlePatientIdChange = (value: string) => {
@@ -513,6 +527,47 @@ function AuthenticatedApp() {
       setAnalysisError(String(msg));
     } finally {
       setAnalysisLoading(false);
+    }
+  };
+
+  const approveAndExportNote = async () => {
+    if (!localEncounterId || !doctorApproval) return;
+    setExportLoading(true);
+    setExportError(null);
+    try {
+      await axios.post(
+        `${API_BASE_URL}/api/v1/encounters/${localEncounterId}/finalize`,
+        { review_comment: 'Doctor approved in mobile review workflow' },
+        { headers: await authorizationHeaders() },
+      );
+      const response = await axios.post<EHRExportStatus>(
+        `${API_BASE_URL}/api/v1/ehr/encounters/${localEncounterId}/approved-note`,
+        {},
+        { headers: await authorizationHeaders() },
+      );
+      setExportStatus(response.data);
+    } catch (err: any) {
+      setExportError(String(err?.response?.data?.detail || err?.message || 'Unable to export approved note.'));
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const retryExport = async () => {
+    if (!exportStatus?.id) return;
+    setExportLoading(true);
+    setExportError(null);
+    try {
+      const response = await axios.post<EHRExportStatus>(
+        `${API_BASE_URL}/api/v1/ehr/messages/${exportStatus.id}/retry`,
+        {},
+        { headers: await authorizationHeaders() },
+      );
+      setExportStatus(response.data);
+    } catch (err: any) {
+      setExportError(String(err?.response?.data?.detail || err?.message || 'Unable to retry export.'));
+    } finally {
+      setExportLoading(false);
     }
   };
 
@@ -949,6 +1004,7 @@ function AuthenticatedApp() {
             {analysisError && <Text style={styles.errorText}>{analysisError}</Text>}
 
             {analysis && (
+              <>
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>Analysis</Text>
                 {/* Try to render SOAP-style sections if present */}
@@ -990,6 +1046,39 @@ function AuthenticatedApp() {
                   );
                 })()}
               </View>
+              <View style={styles.warningCard}>
+                <Text style={styles.warningTitle}>Doctor review required</Text>
+                <Text style={styles.warningText}>
+                  Review every section above. Nothing is sent to Epic until you explicitly approve the final note.
+                </Text>
+                <TouchableOpacity style={styles.checkboxRow} onPress={() => setDoctorApproval(!doctorApproval)}>
+                  <View style={[styles.checkbox, doctorApproval && styles.checkboxChecked]}>
+                    {doctorApproval && <Text style={styles.checkboxMark}>✓</Text>}
+                  </View>
+                  <Text style={styles.checkboxLabel}>I am the doctor and approve this note as final.</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.button}
+                  onPress={approveAndExportNote}
+                  disabled={!doctorApproval || !localEncounterId || exportLoading || exportStatus?.status === 'delivered'}
+                >
+                  {exportLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Approve & Send to Epic</Text>}
+                </TouchableOpacity>
+                {exportStatus && (
+                  <Text style={exportStatus.status === 'delivered' ? styles.successText : styles.hint}>
+                    Epic delivery: {exportStatus.status} · attempts: {exportStatus.retry_count + 1}
+                  </Text>
+                )}
+                {exportStatus?.status === 'failed' && (
+                  <TouchableOpacity style={styles.buttonSecondary} onPress={retryExport} disabled={exportLoading}>
+                    <Text style={styles.buttonSecondaryText}>Retry safely</Text>
+                  </TouchableOpacity>
+                )}
+                {(exportError || exportStatus?.last_error) && (
+                  <Text style={styles.errorText}>{exportError || exportStatus?.last_error}</Text>
+                )}
+              </View>
+              </>
             )}
           </View>
         )}

@@ -10,11 +10,13 @@ from src.backend.infra.db.session import create_sqlalchemy_session_factory
 from src.backend.infra.db.sql_encounters import SqlEncounterRepository
 from src.backend.infra.db.sql_notes_jobs import SqlClinicalNoteRepository, SqlTranscriptionJobRepository
 from src.backend.infra.db import inmemory as inmemory_repos
+from src.backend.infra.db import ehr_inmemory as ehr_repos
+from src.backend.infra.db.sql_ehr import SqlEHRConnectionRepository, SqlEHRMessageRepository
 from src.backend.services.users.service import user_service
 from src.backend.services.conversation.service import conversation_service
 from src.backend.infra.storage.audio import configure_postgres_audio_storage
 
-REQUIRED_SCHEMA_REVISION = "0003_smart_encounter_confirmation"
+REQUIRED_SCHEMA_REVISION = "0004_durable_ehr_outbox"
 
 
 def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma: no cover - side-effectful wiring
@@ -41,7 +43,7 @@ def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma
         connection.execute(text("SELECT 1"))
     required_tables = {
         "encounters", "clinical_notes", "transcription_jobs", "users", "audio_blobs",
-        "conversation_sessions",
+        "conversation_sessions", "ehr_connections", "ehr_messages",
     }
     missing_tables = required_tables - set(inspect(engine).get_table_names())
     if missing_tables:
@@ -65,6 +67,8 @@ def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma
     inmemory_repos.encounter_repository.set_target(SqlEncounterRepository(session_factory))
     inmemory_repos.clinical_note_repository.set_target(SqlClinicalNoteRepository(session_factory))
     inmemory_repos.transcription_job_repository.set_target(SqlTranscriptionJobRepository(session_factory))
+    ehr_repos.ehr_connection_repository.set_target(SqlEHRConnectionRepository(session_factory))
+    ehr_repos.ehr_message_repository.set_target(SqlEHRMessageRepository(session_factory))
     user_service.configure_persistence(session_factory)
     conversation_service.configure_persistence(session_factory)
     configure_postgres_audio_storage(session_factory)

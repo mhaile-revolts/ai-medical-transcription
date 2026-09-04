@@ -1,4 +1,5 @@
 from uuid import UUID
+from datetime import datetime, timezone
 
 from src.backend.services.encounters.service import encounter_service
 from src.backend.domain.models.clinical_encounter import EncounterStatus
@@ -62,6 +63,33 @@ def test_upsert_note_advances_status():
     finalized = encounter_service.get_encounter(encounter.id)
     assert finalized is not None
     assert finalized.status == EncounterStatus.FINALIZED
+
+
+def test_finalized_note_cannot_be_overwritten_with_stale_approval():
+    encounter = encounter_service.create_encounter(patient_id="immutable-note")
+    original = encounter_service.upsert_note_from_soap(
+        encounter_id=encounter.id,
+        subjective="approved",
+        objective="O",
+        assessment="A",
+        plan="P",
+        editor_id="doctor",
+    )
+    original.is_finalized = True
+    original.reviewed_by = "doctor"
+    original.reviewed_at = datetime.now(timezone.utc)
+
+    attempted = encounter_service.upsert_note_from_soap(
+        encounter_id=encounter.id,
+        subjective="unapproved edit",
+        objective="O2",
+        assessment="A2",
+        plan="P2",
+        editor_id="someone",
+        finalize=True,
+    )
+    assert attempted.subjective.text == "approved"
+    assert attempted.reviewed_by == "doctor"
 
 
 async def test_create_and_get_encounter_via_api():

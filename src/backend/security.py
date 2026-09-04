@@ -162,6 +162,11 @@ def ensure_is_admin(user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Administrator access required")
 
 
+def ensure_is_doctor(user: User) -> None:
+    if user.role != UserRole.CLINICIAN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Doctor access required")
+
+
 def ensure_is_scribe_or_admin(user: User) -> None:
     if user.role not in {UserRole.ADMIN, UserRole.SCRIBE}:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to access scribe resources")
