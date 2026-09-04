@@ -20,6 +20,13 @@ class EncounterORM(Base):  # pragma: no cover - not wired yet
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     clinician_id: Mapped[str | None] = mapped_column(String, nullable=True)
     patient_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_patient_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_encounter_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    external_encounter_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    consent_obtained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    consent_method: Mapped[str | None] = mapped_column(String, nullable=True)
+    consent_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    consent_revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str | None] = mapped_column(String, nullable=True)
     assigned_scribe_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -39,6 +46,13 @@ class EncounterORM(Base):  # pragma: no cover - not wired yet
             created_at=encounter.created_at,
             clinician_id=encounter.clinician_id,
             patient_id=encounter.patient_id,
+            external_patient_id=encounter.external_patient_id,
+            external_encounter_id=encounter.external_encounter_id,
+            external_encounter_status=encounter.external_encounter_status,
+            consent_obtained_at=encounter.consent_obtained_at,
+            consent_method=encounter.consent_method,
+            consent_version=encounter.consent_version,
+            consent_revoked_at=encounter.consent_revoked_at,
             status=encounter.status.value,
             title=encounter.title,
             assigned_scribe_id=encounter.assigned_scribe_id,
@@ -60,6 +74,13 @@ class EncounterORM(Base):  # pragma: no cover - not wired yet
             created_at=self.created_at,
             clinician_id=self.clinician_id,
             patient_id=self.patient_id,
+            external_patient_id=self.external_patient_id,
+            external_encounter_id=self.external_encounter_id,
+            external_encounter_status=self.external_encounter_status,
+            consent_obtained_at=self.consent_obtained_at,
+            consent_method=self.consent_method,
+            consent_version=self.consent_version,
+            consent_revoked_at=self.consent_revoked_at,
             status=EncounterStatus(self.status),
             title=self.title,
             assigned_scribe_id=self.assigned_scribe_id,

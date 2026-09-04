@@ -11,6 +11,7 @@ python -m pip install \
 # refresh the lockfile instead of making the reconciliation hook fail.
 npm install --no-audit --no-fund --prefix src/frontend/web
 npm run build --prefix src/frontend/web
+npm install --no-audit --no-fund --prefix src/frontend/mobile
 
 if [[ "${APP_MODE:-demo}" != "demo" ]]; then
   if [[ -z "${DATABASE_URL:-}" ]]; then

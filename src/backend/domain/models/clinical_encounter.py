@@ -27,6 +27,15 @@ class ClinicalEncounter(BaseModel):
     created_at: datetime
     clinician_id: Optional[str] = None
     patient_id: Optional[str] = None
+    # External SMART/FHIR identifiers and consent evidence are set only by the
+    # server-side confirmation workflow.
+    external_patient_id: Optional[str] = None
+    external_encounter_id: Optional[str] = None
+    external_encounter_status: Optional[str] = None
+    consent_obtained_at: Optional[datetime] = None
+    consent_method: Optional[str] = None
+    consent_version: Optional[str] = None
+    consent_revoked_at: Optional[datetime] = None
     status: EncounterStatus = EncounterStatus.CREATED
     title: Optional[str] = None
     transcription_job_ids: List[UUID] = Field(default_factory=list)

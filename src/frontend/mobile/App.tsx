@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -56,6 +56,25 @@ interface AnalyzeResponse {
 interface IngestAudioResponse {
   job: TranscriptJob;
   encounter_id?: string | null;
+}
+
+interface SmartPatient {
+  id: string;
+  display_name: string;
+  birth_date?: string | null;
+  sex?: string | null;
+  source: string;
+}
+
+interface SmartEncounter {
+  id: string;
+  status: string;
+  type?: string | null;
+  period_start?: string | null;
+}
+
+interface ConfirmedEncounter {
+  id: string;
 }
 
 function MobileSignIn() {
@@ -204,6 +223,20 @@ function AuthenticatedApp() {
   const [uploadResult, setUploadResult] = useState<IngestAudioResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
 
+  // Patient and encounter confirmation must complete before audio capture.
+  const [patientId, setPatientId] = useState('');
+  const [patient, setPatient] = useState<SmartPatient | null>(null);
+  const [encounters, setEncounters] = useState<SmartEncounter[]>([]);
+  const [patientConfirmed, setPatientConfirmed] = useState(false);
+  const [selectedExternalEncounterId, setSelectedExternalEncounterId] = useState<string | null>(null);
+  const [recordingConsent, setRecordingConsent] = useState(false);
+  const [localEncounterId, setLocalEncounterId] = useState<string | null>(null);
+  const [patientLoading, setPatientLoading] = useState(false);
+  const [confirmLoading, setConfirmLoading] = useState(false);
+  const [patientError, setPatientError] = useState<string | null>(null);
+  const patientLookupRequest = useRef(0);
+  const encounterConfirmRequest = useRef(0);
+
   // WebSocket live transcription state
   const [liveWs, setLiveWs] = useState<any | null>(null);
   const [liveRecording, setLiveRecording] = useState<Audio.Recording | null>(null);
@@ -216,6 +249,98 @@ function AuthenticatedApp() {
     const token = await getToken({ skipCache: true });
     if (!token) throw new Error('Your session has expired. Please sign in again.');
     return { Authorization: `Bearer ${token}` };
+  };
+
+  const resetPatientWorkflow = () => {
+    patientLookupRequest.current += 1;
+    encounterConfirmRequest.current += 1;
+    setPatient(null);
+    setEncounters([]);
+    setPatientConfirmed(false);
+    setSelectedExternalEncounterId(null);
+    setRecordingConsent(false);
+    setLocalEncounterId(null);
+    setPatientError(null);
+    setPatientLoading(false);
+    setConfirmLoading(false);
+    setUploadError(null);
+  };
+
+  const handlePatientIdChange = (value: string) => {
+    setPatientId(value);
+    resetPatientWorkflow();
+  };
+
+  const lookupPatient = async () => {
+    const normalizedPatientId = patientId.trim();
+    if (!normalizedPatientId) {
+      setPatientError('Enter a patient ID before looking up the patient.');
+      return;
+    }
+    resetPatientWorkflow();
+    const requestId = patientLookupRequest.current;
+    setPatientLoading(true);
+    try {
+      const headers = await authorizationHeaders();
+      const patientResponse = await axios.get(
+        `${API_BASE_URL}/api/v1/ehr/smart/patients/${encodeURIComponent(normalizedPatientId)}`,
+        { headers },
+      );
+      const encounterResponse = await axios.get(
+        `${API_BASE_URL}/api/v1/ehr/smart/patients/${encodeURIComponent(normalizedPatientId)}/encounters`,
+        { headers: await authorizationHeaders() },
+      );
+      const activeEncounters = (encounterResponse.data as SmartEncounter[]).filter((encounter) =>
+        ['active', 'in-progress', 'arrived', 'triaged', 'onleave'].includes(encounter.status.toLowerCase()),
+      );
+      if (patientLookupRequest.current !== requestId) return;
+      setPatient(patientResponse.data as SmartPatient);
+      setEncounters(activeEncounters);
+      if (activeEncounters.length === 0) {
+        setPatientError('No active encounters are available for this patient. Recording cannot begin.');
+      }
+    } catch (err: any) {
+      if (patientLookupRequest.current !== requestId) return;
+      const msg = err?.response?.data?.detail || err?.message || 'Unable to look up patient information.';
+      setPatientError(String(msg));
+    } finally {
+      if (patientLookupRequest.current === requestId) setPatientLoading(false);
+    }
+  };
+
+  const confirmEncounterForRecording = async () => {
+    if (!patient || !patientConfirmed || !selectedExternalEncounterId || !recordingConsent) {
+      setPatientError('Confirm the patient, choose an active encounter, and document recording consent first.');
+      return;
+    }
+    setPatientError(null);
+    const requestId = encounterConfirmRequest.current + 1;
+    encounterConfirmRequest.current = requestId;
+    setConfirmLoading(true);
+    try {
+      const response = await axios.post<ConfirmedEncounter>(
+        `${API_BASE_URL}/api/v1/ehr/smart/confirm`,
+        {
+          patient_id: patient.id,
+          external_encounter_id: selectedExternalEncounterId,
+          consent_obtained: true,
+          consent_method: 'mobile_checkbox',
+          consent_version: 'mobile-recording-consent-v1',
+        },
+        { headers: await authorizationHeaders() },
+      );
+      if (!response.data?.id) {
+        throw new Error('The backend did not return a local encounter ID.');
+      }
+      if (encounterConfirmRequest.current !== requestId) return;
+      setLocalEncounterId(response.data.id);
+    } catch (err: any) {
+      if (encounterConfirmRequest.current !== requestId) return;
+      const msg = err?.response?.data?.detail || err?.message || 'Unable to confirm encounter for recording.';
+      setPatientError(String(msg));
+    } finally {
+      if (encounterConfirmRequest.current === requestId) setConfirmLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -237,6 +362,10 @@ function AuthenticatedApp() {
   }, [getToken]);
 
   const uploadRecording = async (uri: string) => {
+    if (!localEncounterId) {
+      setUploadError('Confirm the patient, active encounter, and recording consent before uploading.');
+      return;
+    }
     setUploadError(null);
     setUploadResult(null);
     try {
@@ -246,6 +375,8 @@ function AuthenticatedApp() {
         name: 'recording.m4a',
         type: 'audio/m4a',
       } as any);
+      // This is the backend-created encounter, never an external ID or clinician-controlled value.
+      formData.append('encounter_id', localEncounterId);
 
       const queryParts: string[] = [];
       if (languageCode) {
@@ -280,6 +411,10 @@ function AuthenticatedApp() {
   };
 
   const startRecording = async () => {
+    if (!localEncounterId) {
+      setUploadError('Recording is locked until the patient and encounter are confirmed with consent.');
+      return;
+    }
     setUploadError(null);
     setUploadResult(null);
     try {
@@ -401,6 +536,10 @@ function AuthenticatedApp() {
   };
 
   const startLiveTranscription = async () => {
+    if (!localEncounterId) {
+      setLiveError('Recording is locked until the patient and encounter are confirmed with consent.');
+      return;
+    }
     setLiveError(null);
     setLivePartialText(null);
     setLiveTotalBytes(0);
@@ -622,6 +761,110 @@ function AuthenticatedApp() {
 
         {/* Record & upload audio from device */}
         <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Patient & Recording Authorization</Text>
+          <View style={styles.warningCard}>
+            <Text style={styles.warningTitle}>Wrong-patient prevention</Text>
+            <Text style={styles.warningText}>
+              Verify the patient’s identity with the patient before continuing. Recording remains locked until
+              the patient, an active encounter, and recording consent are explicitly confirmed.
+            </Text>
+          </View>
+
+          {!patient ? (
+            <>
+              <Text style={styles.label}>Patient ID</Text>
+              <TextInput
+                style={styles.input}
+                value={patientId}
+                onChangeText={handlePatientIdChange}
+                placeholder="Enter patient ID"
+                autoCapitalize="none"
+              />
+              <TouchableOpacity style={styles.button} onPress={lookupPatient} disabled={patientLoading}>
+                {patientLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Look Up Patient</Text>}
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <View style={styles.card}>
+                <Text style={styles.cardTitle}>Confirm this patient before recording</Text>
+                <Text style={styles.cardBody}>Name: {patient.display_name}</Text>
+                <Text style={styles.cardBody}>Date of birth: {patient.birth_date || 'Not available'}</Text>
+                <Text style={styles.cardBody}>Sex: {patient.sex || 'Not available'}</Text>
+                <Text style={styles.cardBody}>Source: {patient.source}</Text>
+                <TouchableOpacity
+                  style={styles.checkboxRow}
+                  onPress={() => {
+                    encounterConfirmRequest.current += 1;
+                    setPatientConfirmed(!patientConfirmed);
+                    setSelectedExternalEncounterId(null);
+                    setRecordingConsent(false);
+                    setLocalEncounterId(null);
+                    setConfirmLoading(false);
+                    setPatientError(null);
+                  }}
+                >
+                  <View style={[styles.checkbox, patientConfirmed && styles.checkboxChecked]}>
+                    {patientConfirmed && <Text style={styles.checkboxMark}>✓</Text>}
+                  </View>
+                  <Text style={styles.checkboxLabel}>I verified this is the correct patient.</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity style={styles.buttonSecondary} onPress={resetPatientWorkflow}>
+                <Text style={styles.buttonSecondaryText}>Change Patient</Text>
+              </TouchableOpacity>
+
+              {patientConfirmed && (
+                <>
+                  <Text style={styles.label}>Choose active encounter</Text>
+                  {encounters.map((encounter) => (
+                    <TouchableOpacity
+                      key={encounter.id}
+                      style={[styles.encounterOption, selectedExternalEncounterId === encounter.id && styles.encounterOptionSelected]}
+                      onPress={() => {
+                        encounterConfirmRequest.current += 1;
+                        setSelectedExternalEncounterId(encounter.id);
+                        setRecordingConsent(false);
+                        setLocalEncounterId(null);
+                        setConfirmLoading(false);
+                        setPatientError(null);
+                      }}
+                    >
+                      <Text style={styles.cardTitle}>{encounter.type || 'Encounter'}</Text>
+                      <Text style={styles.hint}>Status: {encounter.status}{encounter.period_start ? ` · ${encounter.period_start}` : ''}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  {selectedExternalEncounterId && (
+                    <TouchableOpacity
+                      style={styles.checkboxRow}
+                      onPress={() => {
+                        encounterConfirmRequest.current += 1;
+                        setRecordingConsent(!recordingConsent);
+                        setLocalEncounterId(null);
+                        setConfirmLoading(false);
+                        setPatientError(null);
+                      }}
+                    >
+                      <View style={[styles.checkbox, recordingConsent && styles.checkboxChecked]}>
+                        {recordingConsent && <Text style={styles.checkboxMark}>✓</Text>}
+                      </View>
+                      <Text style={styles.checkboxLabel}>The patient gave consent for this recording.</Text>
+                    </TouchableOpacity>
+                  )}
+                  {recordingConsent && !localEncounterId && (
+                    <TouchableOpacity style={styles.button} onPress={confirmEncounterForRecording} disabled={confirmLoading}>
+                      {confirmLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Confirm & Unlock Recording</Text>}
+                    </TouchableOpacity>
+                  )}
+                  {localEncounterId && <Text style={styles.successText}>Patient, encounter, and consent confirmed. Recording is unlocked.</Text>}
+                </>
+              )}
+            </>
+          )}
+          {patientError && <Text style={styles.errorText}>{patientError}</Text>}
+        </View>
+
+        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Record & Upload Audio</Text>
           <Text style={styles.hint}>
             Uses your microphone and uploads to /api/v1/audio/upload.
@@ -630,14 +873,14 @@ function AuthenticatedApp() {
           <TouchableOpacity
             style={styles.button}
             onPress={handleToggleRecording}
-            disabled={recordingStatus === 'uploading'}
+            disabled={recordingStatus === 'uploading' || !localEncounterId}
           >
             {recordingStatus === 'recording' ? (
               <Text style={styles.buttonText}>Stop & Upload</Text>
             ) : recordingStatus === 'uploading' ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Start Recording</Text>
+              <Text style={styles.buttonText}>{localEncounterId ? 'Start Recording' : 'Confirm patient to record'}</Text>
             )}
           </TouchableOpacity>
 
@@ -665,14 +908,14 @@ function AuthenticatedApp() {
           <TouchableOpacity
             style={styles.button}
             onPress={handleToggleLive}
-            disabled={liveStatus === 'sending'}
+            disabled={liveStatus === 'sending' || !localEncounterId}
           >
             {liveStatus === 'recording' || liveStatus === 'connecting' ? (
               <Text style={styles.buttonText}>Stop & Send</Text>
             ) : liveStatus === 'sending' ? (
               <ActivityIndicator color="#fff" />
             ) : (
-              <Text style={styles.buttonText}>Start Live Session</Text>
+              <Text style={styles.buttonText}>{localEncounterId ? 'Start Live Session' : 'Confirm patient to record'}</Text>
             )}
           </TouchableOpacity>
 
@@ -855,6 +1098,70 @@ const styles = StyleSheet.create({
   cardBody: {
     fontFamily: 'Courier',
     fontSize: 11,
+  },
+  warningCard: {
+    backgroundColor: '#fff3cd',
+    borderColor: '#d39e00',
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  warningTitle: {
+    color: '#7a5600',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  warningText: {
+    color: '#5c4300',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  checkboxRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
+  checkboxChecked: {
+    backgroundColor: '#007AFF',
+  },
+  checkboxMark: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  checkboxLabel: {
+    flex: 1,
+    fontSize: 13,
+    color: '#222',
+  },
+  encounterOption: {
+    backgroundColor: '#fff',
+    borderColor: '#ccc',
+    borderRadius: 8,
+    borderWidth: 1,
+    padding: 12,
+    marginTop: 8,
+  },
+  encounterOptionSelected: {
+    borderColor: '#007AFF',
+    borderWidth: 2,
+  },
+  successText: {
+    color: '#16803c',
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 12,
   },
   mono: {
     fontFamily: 'Courier',

@@ -81,6 +81,13 @@ class SqlEncounterRepository(EncounterRepository):  # pragma: no cover - skeleto
                 existing.created_at = encounter.created_at
                 existing.clinician_id = encounter.clinician_id
                 existing.patient_id = encounter.patient_id
+                existing.external_patient_id = encounter.external_patient_id
+                existing.external_encounter_id = encounter.external_encounter_id
+                existing.external_encounter_status = encounter.external_encounter_status
+                existing.consent_obtained_at = encounter.consent_obtained_at
+                existing.consent_method = encounter.consent_method
+                existing.consent_version = encounter.consent_version
+                existing.consent_revoked_at = encounter.consent_revoked_at
                 existing.status = encounter.status.value
                 existing.title = encounter.title
                 existing.assigned_scribe_id = encounter.assigned_scribe_id

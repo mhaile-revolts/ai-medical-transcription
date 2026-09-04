@@ -14,7 +14,7 @@ from src.backend.services.users.service import user_service
 from src.backend.services.conversation.service import conversation_service
 from src.backend.infra.storage.audio import configure_postgres_audio_storage
 
-REQUIRED_SCHEMA_REVISION = "0002_durable_conversation_sessions"
+REQUIRED_SCHEMA_REVISION = "0003_smart_encounter_confirmation"
 
 
 def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma: no cover - side-effectful wiring

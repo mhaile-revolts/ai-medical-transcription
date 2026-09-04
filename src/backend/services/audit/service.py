@@ -73,7 +73,7 @@ class AuditService:
         "user_id", "role", "count", "finalize", "status", "enabled",
         "suggestion_count", "has_codes", "billing_risk_level", "segment_count",
         "bundle_entry_count", "async", "size_bytes", "total_bytes",
-        "session_id", "encounter_id",
+        "session_id", "encounter_id", "external_encounter_id", "patient_id",
     }
 
     @classmethod
@@ -88,7 +88,7 @@ class AuditService:
                 safe[key] = value
             elif key in {"role", "status", "billing_risk_level"} and isinstance(value, str) and len(value) <= 64:
                 safe[key] = value
-            elif key in {"user_id", "session_id", "encounter_id"} and isinstance(value, str) and len(value) <= 128:
+            elif key in {"user_id", "session_id", "encounter_id", "external_encounter_id", "patient_id"} and isinstance(value, str) and len(value) <= 128:
                 safe[key] = value
         return safe or None
 

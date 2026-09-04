@@ -64,6 +64,18 @@ async def upload_audio(
             detail="Uploaded file too large.",
         )
 
+    selected_encounter = None
+    if encounter_id is not None:
+        selected_encounter = encounter_service.get_encounter(encounter_id)
+        if selected_encounter is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")
+        ensure_can_edit_encounter(current_user, selected_encounter.clinician_id)
+        if not encounter_service.is_confirmed_recording_allowed(selected_encounter):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Encounter requires active SMART confirmation and unrevoked consent",
+            )
+
     # Persist the upload using the original filename when available so that
     # clients (and tests) can rely on the path ending with the uploaded name.
     # Fall back to a UUID-based filename if the client did not supply one.
@@ -92,10 +104,8 @@ async def upload_audio(
 
     # Optionally attach this job to an existing clinical encounter or create one.
     if encounter_id is not None:
-        encounter = encounter_service.get_encounter(encounter_id)
-        if encounter is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")
-        ensure_can_edit_encounter(current_user, encounter.clinician_id)
+        encounter = selected_encounter
+        assert encounter is not None
         encounter_service.attach_job(encounter_id=encounter_id, job_id=job.id)
         attached_encounter_id = encounter_id
     else:
@@ -159,7 +169,13 @@ async def live_transcription(websocket: WebSocket) -> None:
         if encounter is None:
             await websocket.close(code=1008, reason="Encounter not found")
             return
-        ensure_can_edit_encounter(current_user, encounter.clinician_id)
+        try:
+            ensure_can_edit_encounter(current_user, encounter.clinician_id)
+            if not encounter_service.is_confirmed_recording_allowed(encounter):
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Encounter requires active SMART confirmation and unrevoked consent")
+        except HTTPException as exc:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(exc.detail))
+            return
     else:
         # A mobile capture may begin before an encounter exists. Create it only
         # after authentication and assign it to the verified clinician so the
@@ -177,6 +193,12 @@ async def live_transcription(websocket: WebSocket) -> None:
             session_id = None
 
     await websocket.accept()
+    audit_service.log_event(
+        action="recording_started",
+        resource_type="clinical_encounter",
+        resource_id=str(encounter_id),
+        extra={"encounter_id": str(encounter_id)},
+    )
     # Use an opaque durable reference outside demo mode.  Routes import the
     # storage singleton before startup, so resolve it at runtime below.
     from src.backend.infra.storage import audio as audio_module

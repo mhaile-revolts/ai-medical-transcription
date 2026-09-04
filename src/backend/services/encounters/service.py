@@ -77,6 +77,16 @@ class InMemoryEncounterService:
                 encounter_repository.save(encounter)
         return encounter
 
+    @staticmethod
+    def is_confirmed_recording_allowed(encounter: ClinicalEncounter) -> bool:
+        return bool(
+            encounter.external_patient_id
+            and encounter.external_encounter_id
+            and encounter.external_encounter_status in {"arrived", "triaged", "in-progress", "onleave"}
+            and encounter.consent_obtained_at
+            and not encounter.consent_revoked_at
+        )
+
     # Notes
 
     def find_encounter_for_job(self, job_id: UUID) -> Optional[ClinicalEncounter]:

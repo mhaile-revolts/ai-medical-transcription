@@ -126,6 +126,12 @@ class Settings:
     )
     clerk_jwt_public_key: Optional[str] = os.getenv("CLERK_JWT_PUBLIC_KEY")
 
+    # OCHIN SMART on FHIR metadata.  These values identify a deployment only;
+    # access tokens are deliberately never configured or logged by this app.
+    ochin_smart_fhir_base_url: Optional[str] = os.getenv("OCHIN_SMART_FHIR_BASE_URL")
+    ochin_smart_issuer: Optional[str] = os.getenv("OCHIN_SMART_ISSUER")
+    ochin_smart_client_id: Optional[str] = os.getenv("OCHIN_SMART_CLIENT_ID")
+
     # Retention is an operational control; a worker must use these values to
     # purge expired PHI.  Zero is never accepted outside development/test.
     phi_audio_retention_days: int = int(os.getenv("PHI_AUDIO_RETENTION_DAYS", "30"))
