@@ -196,7 +196,11 @@ async def list_messages(
     current_user=Depends(get_current_user),
 ) -> List[EHRMessageSummary]:
     ensure_is_admin(current_user)
-    statuses = (status_filter,) if status_filter else ("pending", "failed", "delivered")
+    statuses = (
+        (status_filter,)
+        if status_filter
+        else ("pending", "processing", "failed", "terminal", "delivered")
+    )
     messages: List[EHRMessage] = ehr_integration_service.list_messages_by_status(*statuses)
     return [
         EHRMessageSummary(
@@ -215,6 +219,21 @@ async def list_messages(
         )
         for m in messages
     ]
+
+
+@router.get("/messages/{message_id}", response_model=EHRMessageSummary)
+async def get_message_status(
+    message_id: UUID, current_user=Depends(get_current_user),
+) -> EHRMessageSummary:
+    ensure_is_doctor(current_user)
+    message = ehr_integration_service.get_message(message_id)
+    if message is None:
+        raise HTTPException(status_code=404, detail="EHR message not found")
+    encounter = encounter_repository.get(message.related_encounter_id) if message.related_encounter_id else None
+    if encounter is None:
+        raise HTTPException(status_code=404, detail="Encounter not found")
+    ensure_can_edit_encounter(current_user, encounter.clinician_id)
+    return EHRMessageSummary(**message.model_dump())
 
 
 @router.post("/encounters/{encounter_id}/approved-note", response_model=EHRMessageSummary)

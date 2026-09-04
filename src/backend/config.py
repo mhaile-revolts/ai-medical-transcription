@@ -76,6 +76,14 @@ class Settings:
     database_url: Optional[str] = os.getenv("DATABASE_URL")
     use_sql_repos: bool = os.getenv("USE_SQL_REPOS", "false").lower() == "true"
 
+    ehr_dispatch_enabled: bool = os.getenv("EHR_DISPATCH_ENABLED", "true").lower() == "true"
+    ehr_dispatch_poll_seconds: float = float(os.getenv("EHR_DISPATCH_POLL_SECONDS", "5"))
+    ehr_dispatch_batch_size: int = int(os.getenv("EHR_DISPATCH_BATCH_SIZE", "10"))
+    ehr_dispatch_lease_seconds: int = int(os.getenv("EHR_DISPATCH_LEASE_SECONDS", "120"))
+    ehr_retry_max_attempts: int = int(os.getenv("EHR_RETRY_MAX_ATTEMPTS", "6"))
+    ehr_retry_base_seconds: int = int(os.getenv("EHR_RETRY_BASE_SECONDS", "60"))
+    ehr_retry_max_seconds: int = int(os.getenv("EHR_RETRY_MAX_SECONDS", "3600"))
+
     # Optional settings for external providers.
     openai_api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
     whisper_model_name: str = os.getenv("WHISPER_MODEL_NAME", "base")

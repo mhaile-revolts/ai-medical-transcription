@@ -16,7 +16,7 @@ from src.backend.services.users.service import user_service
 from src.backend.services.conversation.service import conversation_service
 from src.backend.infra.storage.audio import configure_postgres_audio_storage
 
-REQUIRED_SCHEMA_REVISION = "0005_secure_smart_tokens"
+REQUIRED_SCHEMA_REVISION = "0006_ehr_delivery_leases"
 
 
 def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma: no cover - side-effectful wiring

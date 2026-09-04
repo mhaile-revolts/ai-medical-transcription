@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime, timedelta
 from typing import Iterable, Optional
 from uuid import UUID
 
@@ -52,4 +53,36 @@ class EHRMessageRepository(ABC):
 
     @abstractmethod
     def save(self, message: EHRMessage) -> None:
+        raise NotImplementedError
+
+    @abstractmethod
+    def claim_due(
+        self,
+        *,
+        worker_id: str,
+        now: datetime,
+        limit: int,
+        lease_duration: timedelta,
+        max_retries: int,
+    ) -> list[EHRMessage]:
+        """Atomically lease due messages across tenants for a background worker."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def claim_message(
+        self, message_id: UUID, *, worker_id: str, now: datetime,
+        lease_duration: timedelta,
+    ) -> Optional[EHRMessage]:
+        """Reserve one non-delivered message unless another live claim owns it."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def renew_claim(
+        self, message_id: UUID, *, worker_id: str, expires_at: datetime,
+    ) -> bool:
+        raise NotImplementedError
+
+    @abstractmethod
+    def save_if_claimed(self, message: EHRMessage, *, worker_id: str) -> bool:
+        """Persist an outcome only when the caller still owns the processing claim."""
         raise NotImplementedError

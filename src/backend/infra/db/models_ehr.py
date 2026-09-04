@@ -42,6 +42,8 @@ class EHRMessageORM(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    claim_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     __table_args__ = (
         UniqueConstraint("tenant_id", "connection_id", "idempotency_key", name="uq_ehr_message_idempotency"),

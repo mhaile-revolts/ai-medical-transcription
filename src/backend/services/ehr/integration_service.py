@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 import hashlib
 from typing import Optional
@@ -17,7 +19,8 @@ from src.backend.infra.db.inmemory import clinical_note_repository, encounter_re
 from src.backend.services.ehr import fhir_mapper
 from src.backend.services.ehr.transport import EHRTransport, HttpFHIRTransport, EHRTransportError
 from src.backend.services.audit.service import audit_service
-from src.backend.tenancy import get_current_tenant
+from src.backend.config import settings
+from src.backend.tenancy import get_current_tenant, reset_current_tenant, set_current_tenant
 
 
 class EHRIntegrationService:
@@ -28,8 +31,17 @@ class EHRIntegrationService:
     * Uses in-memory repositories for connections/messages (SQL can be added later).
     """
 
-    def __init__(self, transport: Optional[EHRTransport] = None) -> None:
+    def __init__(
+        self, transport: Optional[EHRTransport] = None, *,
+        max_attempts: Optional[int] = None, retry_base_seconds: Optional[int] = None,
+        retry_max_seconds: Optional[int] = None,
+        lease_seconds: Optional[int] = None,
+    ) -> None:
         self._transport = transport or HttpFHIRTransport()
+        self._max_attempts = max_attempts or settings.ehr_retry_max_attempts
+        self._retry_base_seconds = retry_base_seconds or settings.ehr_retry_base_seconds
+        self._retry_max_seconds = retry_max_seconds or settings.ehr_retry_max_seconds
+        self._lease_seconds = lease_seconds or settings.ehr_dispatch_lease_seconds
 
     # Connection helpers
     def list_active_connections(self) -> list[EHRConnection]:
@@ -115,6 +127,7 @@ class EHRIntegrationService:
             idempotency_key=idempotency_key,
         )
         now = datetime.now(timezone.utc)
+        attempt_id = f"clinician-{uuid4()}"
         message = EHRMessage(
             id=uuid4(),
             tenant_id=tenant_id,
@@ -122,13 +135,15 @@ class EHRIntegrationService:
             resource_type="DocumentReference",
             payload=resource,
             direction="outbound",
-            status="pending",
+            status="processing",
             related_encounter_id=encounter.id,
             related_note_id=note.id,
             created_at=now,
             updated_at=now,
             retry_count=0,
             idempotency_key=idempotency_key,
+            claimed_by=attempt_id,
+            claim_expires_at=now + timedelta(seconds=self._lease_seconds),
         )
         claimed = ehr_message_repository.save_if_absent(message)
         if claimed.id != message.id:
@@ -144,7 +159,8 @@ class EHRIntegrationService:
             },
         )
         return await self._deliver_message(
-            message=message, connection=connection, encounter=encounter, note=note
+            message=message, connection=connection, encounter=encounter, note=note,
+            attempt_source="clinician", worker_id=attempt_id,
         )
 
     async def retry_message(self, message_id: UUID) -> EHRMessage:
@@ -169,9 +185,57 @@ class EHRIntegrationService:
         self._validate_delivery(connection=connection, encounter=encounter, note=note)
         if self._idempotency_key(connection, note) != message.idempotency_key:
             raise ValueError("Queued export no longer matches the approved note version")
-        return await self._deliver_message(
-            message=message, connection=connection, encounter=encounter, note=note
+        attempt_id = f"clinician-{uuid4()}"
+        claimed = ehr_message_repository.claim_message(
+            message.id, worker_id=attempt_id, now=datetime.now(timezone.utc),
+            lease_duration=timedelta(seconds=self._lease_seconds),
         )
+        if claimed is None:
+            raise ValueError("EHR delivery is already in progress")
+        return await self._deliver_message(
+            message=claimed, connection=connection, encounter=encounter, note=note,
+            attempt_source="clinician", worker_id=attempt_id,
+        )
+
+    async def retry_claimed_message(self, message: EHRMessage, worker_id: str) -> EHRMessage:
+        token = set_current_tenant(message.tenant_id)
+        try:
+            current = ehr_message_repository.get(message.id)
+            if (
+                current is None or current.status != "processing"
+                or current.claimed_by != worker_id
+            ):
+                return current or message
+            connection = ehr_connection_repository.get(current.connection_id)
+            encounter = encounter_repository.get(current.related_encounter_id) if current.related_encounter_id else None
+            note = clinical_note_repository.get(current.related_note_id) if current.related_note_id else None
+            try:
+                if connection is None or encounter is None or note is None:
+                    raise ValueError("Related EHR delivery records are unavailable")
+                self._validate_delivery(connection=connection, encounter=encounter, note=note)
+                if self._idempotency_key(connection, note) != current.idempotency_key:
+                    raise ValueError("Queued export no longer matches the approved note version")
+            except ValueError as exc:
+                current.status = "terminal"
+                current.last_error = str(exc)
+                current.next_retry_at = None
+                current.claimed_by = None
+                current.claim_expires_at = None
+                if not ehr_message_repository.save_if_claimed(current, worker_id=worker_id):
+                    return ehr_message_repository.get(current.id) or current
+                audit_service.log_event(
+                    action="ehr_export_terminal",
+                    resource_type="ehr_message",
+                    resource_id=str(current.id),
+                    extra={"automated": True, "terminal": True, "worker_id": worker_id},
+                )
+                return current
+            return await self._deliver_message(
+                message=current, connection=connection, encounter=encounter, note=note,
+                attempt_source="automatic", worker_id=worker_id,
+            )
+        finally:
+            reset_current_tenant(token)
 
     async def _deliver_message(
         self,
@@ -180,18 +244,30 @@ class EHRIntegrationService:
         connection: EHRConnection,
         encounter: ClinicalEncounter,
         note: ClinicalNote,
+        attempt_source: str,
+        worker_id: Optional[str] = None,
     ) -> EHRMessage:
         now = datetime.now(timezone.utc)
-        message.status = "pending"
+        if worker_id is None:
+            raise RuntimeError("Every EHR delivery attempt must own a lease")
+        message.status = "processing"
         message.last_attempt_at = now
         message.last_error = None
-        ehr_message_repository.save(message)
+        message.claimed_by = worker_id
+        if not ehr_message_repository.save_if_claimed(message, worker_id=worker_id):
+            return ehr_message_repository.get(message.id) or message
         audit_service.log_event(
             action="ehr_export_attempted",
             resource_type="ehr_message",
             resource_id=str(message.id),
-            extra={"retry_count": message.retry_count},
+            extra={
+                "retry_count": message.retry_count,
+                "attempt_source": attempt_source,
+                "automated": attempt_source == "automatic",
+                "worker_id": worker_id,
+            },
         )
+        heartbeat = asyncio.create_task(self._renew_lease(message.id, worker_id))
         try:
             receipt = await self._transport.send_resource(
                 connection, message.payload, message.idempotency_key
@@ -200,11 +276,17 @@ class EHRIntegrationService:
             message.status = "failed"
             message.last_error = str(exc)
             message.retry_count += 1
-            message.next_retry_at = (
-                now + timedelta(minutes=min(2 ** message.retry_count, 60))
-                if exc.retryable else None
+            terminal = not exc.retryable or message.retry_count >= self._max_attempts
+            delay_seconds = min(
+                self._retry_base_seconds * (2 ** max(message.retry_count - 1, 0)),
+                self._retry_max_seconds,
             )
-            ehr_message_repository.save(message)
+            message.status = "terminal" if terminal else "failed"
+            message.next_retry_at = None if terminal else now + timedelta(seconds=delay_seconds)
+            message.claimed_by = None
+            message.claim_expires_at = None
+            if not ehr_message_repository.save_if_claimed(message, worker_id=worker_id):
+                return ehr_message_repository.get(message.id) or message
 
             audit_service.log_event(
                 action="ehr_export_failed",
@@ -217,14 +299,26 @@ class EHRIntegrationService:
                     "error": str(exc),
                     "retryable": exc.retryable,
                     "retry_count": message.retry_count,
+                    "terminal": terminal,
+                    "delay_seconds": None if terminal else delay_seconds,
+                    "automated": attempt_source == "automatic",
+                    "attempt_source": attempt_source,
+                    "worker_id": worker_id,
                 },
             )
             return message
+        finally:
+            heartbeat.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat
         message.status = "delivered"
         message.remote_resource_id = receipt.remote_resource_id
         message.delivered_at = datetime.now(timezone.utc)
         message.next_retry_at = None
-        ehr_message_repository.save(message)
+        message.claimed_by = None
+        message.claim_expires_at = None
+        if not ehr_message_repository.save_if_claimed(message, worker_id=worker_id):
+            return ehr_message_repository.get(message.id) or message
 
         audit_service.log_event(
             action="ehr_export_sent",
@@ -235,9 +329,23 @@ class EHRIntegrationService:
                 "encounter_id": str(message.related_encounter_id),
                 "note_id": str(message.related_note_id),
                 "remote_resource_id": message.remote_resource_id,
+                "automated": attempt_source == "automatic",
+                "attempt_source": attempt_source,
+                "worker_id": worker_id,
             },
         )
         return message
+
+    async def _renew_lease(self, message_id: UUID, worker_id: str) -> None:
+        interval = max(self._lease_seconds / 3, 0.1)
+        while True:
+            await asyncio.sleep(interval)
+            if not ehr_message_repository.renew_claim(
+                message_id,
+                worker_id=worker_id,
+                expires_at=datetime.now(timezone.utc) + timedelta(seconds=self._lease_seconds),
+            ):
+                return
 
 
 ehr_integration_service = EHRIntegrationService()

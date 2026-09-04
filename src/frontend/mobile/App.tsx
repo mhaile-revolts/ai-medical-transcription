@@ -80,7 +80,7 @@ interface ConfirmedEncounter {
 
 interface EHRExportStatus {
   id: string;
-  status: 'pending' | 'delivered' | 'failed';
+  status: 'pending' | 'processing' | 'delivered' | 'failed' | 'terminal';
   retry_count: number;
   last_error?: string | null;
 }
@@ -603,6 +603,24 @@ function AuthenticatedApp() {
     }
   };
 
+  useEffect(() => {
+    if (!exportStatus?.id || exportStatus.status === 'delivered' || exportStatus.status === 'terminal') {
+      return;
+    }
+    const timer = setInterval(async () => {
+      try {
+        const response = await axios.get<EHRExportStatus>(
+          `${API_BASE_URL}/api/v1/ehr/messages/${exportStatus.id}`,
+          { headers: await authorizationHeaders() },
+        );
+        setExportStatus(response.data);
+      } catch {
+        // Keep the last known delivery state; explicit actions still surface errors.
+      }
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [exportStatus?.id, exportStatus?.status]);
+
   const buildWsUrl = () => {
     let base = API_BASE_URL;
     if (base.startsWith('https://')) {
@@ -1109,7 +1127,7 @@ function AuthenticatedApp() {
                     Epic delivery: {exportStatus.status} · attempts: {exportStatus.retry_count + 1}
                   </Text>
                 )}
-                {exportStatus?.status === 'failed' && (
+                {(exportStatus?.status === 'failed' || exportStatus?.status === 'terminal') && (
                   <TouchableOpacity style={styles.buttonSecondary} onPress={retryExport} disabled={exportLoading}>
                     <Text style={styles.buttonSecondaryText}>Retry safely</Text>
                   </TouchableOpacity>

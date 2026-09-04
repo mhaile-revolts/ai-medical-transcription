@@ -21,13 +21,15 @@ class EHRMessage(BaseModel):
     resource_type: str
     payload: Dict
     direction: Literal["outbound", "inbound"] = "outbound"
-    status: Literal["pending", "delivered", "failed"] = "pending"
+    status: Literal["pending", "processing", "delivered", "failed", "terminal"] = "pending"
     last_error: Optional[str] = None
     idempotency_key: str
     remote_resource_id: Optional[str] = None
     delivered_at: Optional[datetime] = None
     last_attempt_at: Optional[datetime] = None
     next_retry_at: Optional[datetime] = None
+    claimed_by: Optional[str] = None
+    claim_expires_at: Optional[datetime] = None
     related_encounter_id: Optional[UUID] = None
     related_note_id: Optional[UUID] = None
     created_at: datetime

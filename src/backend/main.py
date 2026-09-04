@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -25,8 +26,10 @@ from src.backend.api.v1.routes_ehr import callback_router as ehr_callback_router
 from src.backend.config import settings
 from src.backend.infra.db.bootstrap import init_sql_repositories
 from src.backend.services.audit.service import configure_audit_sink
+from src.backend.services.ehr.dispatcher import ehr_delivery_dispatcher
 
 app = FastAPI(title="AI Medical Transcription Detector API")
+ehr_dispatch_task = None
 
 def _validate_security_configuration() -> None:
     """Reject insecure PHI deployment defaults before accepting requests."""
@@ -77,6 +80,9 @@ async def startup_event():
     configure_audit_sink()
     if settings.app_mode != "demo" or settings.use_sql_repos:
         init_sql_repositories()
+    global ehr_dispatch_task
+    if settings.ehr_dispatch_enabled:
+        ehr_dispatch_task = asyncio.create_task(ehr_delivery_dispatcher.run())
 
 
 @app.on_event("shutdown")
@@ -85,7 +91,9 @@ async def shutdown_event():
 
     Add graceful shutdown logic here if needed (e.g., closing DB connections).
     """
-    pass
+    ehr_delivery_dispatcher.stop()
+    if ehr_dispatch_task is not None:
+        await ehr_dispatch_task
 
 # CORS defaults are development-only; startup rejects wildcard production CORS.
 allow_origins = [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()] or ["*"]

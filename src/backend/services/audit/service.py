@@ -74,6 +74,8 @@ class AuditService:
         "suggestion_count", "has_codes", "billing_risk_level", "segment_count",
         "bundle_entry_count", "async", "size_bytes", "total_bytes",
         "session_id", "encounter_id", "external_encounter_id", "patient_id",
+        "connection_id", "note_id", "retry_count", "retryable", "terminal",
+        "automated", "attempt_source", "delay_seconds", "worker_id",
     }
 
     @classmethod
@@ -86,9 +88,9 @@ class AuditService:
                 continue
             if isinstance(value, (bool, int, float)):
                 safe[key] = value
-            elif key in {"role", "status", "billing_risk_level"} and isinstance(value, str) and len(value) <= 64:
+            elif key in {"role", "status", "billing_risk_level", "attempt_source"} and isinstance(value, str) and len(value) <= 64:
                 safe[key] = value
-            elif key in {"user_id", "session_id", "encounter_id", "external_encounter_id", "patient_id"} and isinstance(value, str) and len(value) <= 128:
+            elif key in {"user_id", "session_id", "encounter_id", "external_encounter_id", "patient_id", "connection_id", "note_id", "worker_id"} and isinstance(value, str) and len(value) <= 128:
                 safe[key] = value
         return safe or None
 
