@@ -19,3 +19,12 @@ class ClinicianSummaryMetrics(BaseModel):
     notes_finalized: int
     notes_pending_review: int
     avg_finalization_delay_minutes: Optional[float] = None
+
+
+class PilotSummaryMetrics(BaseModel):
+    total_analyzed_jobs: int
+    total_analyzed_sessions: int
+    avg_codes_per_job: Optional[float] = None
+    high_risk_jobs: int
+    feedback_items_overall: int
+    feedback_items_codes: int

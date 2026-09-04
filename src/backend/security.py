@@ -143,6 +143,17 @@ def ensure_can_edit_encounter(user: User, clinician_id: Optional[str]) -> None:
     ensure_can_view_encounter(user, clinician_id)
 
 
+def ensure_is_admin(user: User) -> None:
+    """Raise HTTP 403 unless the current user is an administrator."""
+
+    if user.role == UserRole.ADMIN:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Administrator access required",
+    )
+
+
 def ensure_is_scribe_or_admin(user: User) -> None:
     """Raise HTTP 403 if the user is not a scribe or admin.
 

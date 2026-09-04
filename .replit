@@ -2,6 +2,31 @@ modules = ["python-3.12", "nodejs-20", "bash", "web"]
 
 [nix]
 channel = "stable-25_05"
+packages = ["libxcrypt"]
 
 [agent]
 expertMode = true
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "bash scripts/start_replit.sh"
+
+[[ports]]
+localPort = 5000
+externalPort = 80
