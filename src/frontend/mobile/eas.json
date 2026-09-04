@@ -5,9 +5,7 @@
   "build": {
     "preview": {
       "distribution": "internal",
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://staging.your-backend.example.com"
-      },
+      "environment": "preview",
       "android": {
         "buildType": "apk"
       },
@@ -17,9 +15,7 @@
     },
     "production": {
       "distribution": "store",
-      "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://api.your-backend.example.com"
-      },
+      "environment": "production",
       "android": {
         "buildType": "app-bundle"
       },

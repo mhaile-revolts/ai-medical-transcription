@@ -32,7 +32,7 @@ Use it when promoting a new build or before starting a clinic session.
    ```
 2. In the browser:
    - Confirm you can load the app.
-   - If API auth is enabled, enter your API key and confirm calls succeed.
+    - Sign in with an individual Clerk development account and confirm protected calls succeed.
 
 ### 1.3 Mobile app (simulator or device)
 
@@ -43,8 +43,7 @@ Use it when promoting a new build or before starting a clinic session.
    npm run start
    ```
 2. Launch on a simulator or device.
-3. In the **Authentication** section of the app:
-   - If API auth is enabled, enter a valid API key.
+3. Sign in with an individual Clerk development account that has tenant and role claims.
 4. Validate flows:
    - **Backend Health** shows `{ "status": "ok" }`.
    - **Record & Upload Audio**:
@@ -71,14 +70,16 @@ Goal: validate with staging DB, staging API URL, and staging mobile builds.
    ```bash
    export DATABASE_URL="postgresql+psycopg2://user:password@host:5432/clinic_mvp_staging"
    export USE_SQL_REPOS=true
-   export ENABLE_API_AUTH=true
-   export API_KEYS="staging-key-1,staging-key-2"
+   export APP_ENV=staging
+   export CLERK_ISSUER="https://your-staging-clerk-issuer"
+   export CLERK_JWKS_URL="https://your-staging-clerk-issuer/.well-known/jwks.json"
    ```
 2. Deploy or start the backend using your staging process (Docker, Kubernetes, etc.).
 3. From a machine that can reach staging:
    - `GET https://staging-clinic-api.example.com/health`
    - `GET https://staging-clinic-api.example.com/api/v1/health`.
-   - Confirm `401` when missing/invalid API key on protected routes.
+   - Confirm `401` when a protected route has no valid Clerk session.
+   - Confirm `403` when the verified session lacks tenant or role claims.
 
 ### 2.2 Web app (staging)
 
@@ -89,13 +90,14 @@ Goal: validate with staging DB, staging API URL, and staging mobile builds.
    ```
 2. Deploy `dist/` to your staging static host.
 3. In the browser (staging URL):
-   - Enter a staging API key.
+   - Sign in with an individual staging Clerk account.
    - Exercise core flows (upload audio, view encounters, run analysis).
 
 ### 2.3 Mobile app (staging)
 
-1. Ensure `src/frontend/mobile/eas.json` has:
-   - `build.preview.env.EXPO_PUBLIC_API_BASE_URL=https://staging-clinic-api.example.com`.
+1. Ensure the selected EAS `preview` environment has:
+   - `EXPO_PUBLIC_API_BASE_URL=https://staging-clinic-api.example.com`.
+   - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` set to the staging Clerk publishable key.
 2. Build and distribute staging mobile apps:
    ```bash
    cd src/frontend/mobile
@@ -103,7 +105,7 @@ Goal: validate with staging DB, staging API URL, and staging mobile builds.
    eas build --platform ios --profile preview
    ```
 3. On staging devices:
-   - Enter a staging API key in Authentication.
+   - Sign in with an individual staging Clerk account.
    - Repeat the **Local dev** mobile checks, but against the staging URL.
 
 Additional staging checks:
@@ -130,13 +132,14 @@ Run these checks before any new pilot rollout.
    ```bash
    export DATABASE_URL="postgresql+psycopg2://user:password@securedb:5432/clinic_mvp_pilot"
    export USE_SQL_REPOS=true
-   export ENABLE_API_AUTH=true
-   export API_KEYS="pilot-clinic-key-1,pilot-clinic-key-2"
+   export APP_ENV=production
+   export CLERK_ISSUER="https://your-production-clerk-issuer"
+   export CLERK_JWKS_URL="https://your-production-clerk-issuer/.well-known/jwks.json"
    export CORS_ALLOW_ORIGINS="https://pilot-clinic-ui.example.com"
    ```
 2. Confirm:
    - `/health` and `/api/v1/health` return OK over HTTPS.
-   - All protected routes require a valid API key.
+   - All protected routes require a valid Clerk session with tenant and role claims.
 
 ### 3.2 Web app (pilot)
 
@@ -147,7 +150,7 @@ Run these checks before any new pilot rollout.
    ```
 2. Deploy to the pilot frontend host.
 3. From a pilot workstation:
-   - Log in / enter API key.
+   - Sign in with an individual pilot Clerk account.
    - Run a **full encounter flow** with synthetic or non-identifying data first:
      - Upload audio.
      - Wait for transcription completion.
@@ -156,8 +159,9 @@ Run these checks before any new pilot rollout.
 
 ### 3.3 Mobile app (pilot)
 
-1. Ensure `eas.json` has:
-   - `build.production.env.EXPO_PUBLIC_API_BASE_URL=https://pilot-clinic-api.example.com`.
+1. Ensure the selected EAS `production` environment has:
+   - `EXPO_PUBLIC_API_BASE_URL=https://pilot-clinic-api.example.com`.
+   - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` set to the production Clerk publishable key.
 2. Build pilot mobile apps:
    ```bash
    cd src/frontend/mobile
@@ -165,7 +169,7 @@ Run these checks before any new pilot rollout.
    eas build --platform ios --profile production
    ```
 3. On pilot devices:
-   - Enter a pilot API key.
+   - Sign in with an individual pilot Clerk account.
    - Use non-identifying test audio to run through:
      - Record & Upload Audio.
      - Live Transcription.

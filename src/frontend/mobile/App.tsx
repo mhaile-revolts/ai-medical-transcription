@@ -12,13 +12,24 @@ import {
 import axios from 'axios';
 import { StatusBar } from 'expo-status-bar';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+import * as FileSystem from 'expo-file-system/legacy';
+import {
+  ClerkProvider,
+  useAuth,
+  useClerk,
+} from '@clerk/expo';
+import { useSignIn } from '@clerk/expo/legacy';
+import { tokenCache } from './tokenCache';
 
 // Base URL for the backend API. Can be overridden via EXPO_PUBLIC_API_BASE_URL at build time.
 const API_BASE_URL = (process.env.EXPO_PUBLIC_API_BASE_URL as string | undefined) ?? 'http://localhost:8000';
 
-// Authentication is controlled via an API key sent as X-API-Key. The value
-// is provided by the user at runtime via the UI, not hard-coded.
+const configuredClerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+if (!configuredClerkPublishableKey) {
+  throw new Error('Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY');
+}
+const CLERK_PUBLISHABLE_KEY: string = configuredClerkPublishableKey;
 
 interface HealthResponse {
   status?: string;
@@ -47,7 +58,130 @@ interface IngestAudioResponse {
   encounter_id?: string | null;
 }
 
-export default function App() {
+function MobileSignIn() {
+  const { signIn, setActive, isLoaded } = useSignIn();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [secondFactorStrategy, setSecondFactorStrategy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    if (!isLoaded) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await signIn.create({ identifier: email, password });
+      if (result.status === 'needs_second_factor') {
+        const factors = result.supportedSecondFactors ?? [];
+        const factor =
+          factors.find((item: any) => item.strategy === 'totp') ??
+          factors.find((item: any) => item.strategy === 'phone_code') ??
+          factors.find((item: any) => item.strategy === 'backup_code');
+        if (!factor) {
+          throw new Error('No supported second-factor method is available for this account.');
+        }
+        if (factor.strategy === 'phone_code') {
+          await result.prepareSecondFactor({
+            strategy: 'phone_code',
+            phoneNumberId: factor.phoneNumberId,
+          });
+        }
+        setSecondFactorStrategy(factor.strategy);
+        return;
+      }
+      if (result.status !== 'complete') {
+        throw new Error(`Unable to complete sign-in (${result.status}).`);
+      }
+      await setActive({ session: result.createdSessionId });
+    } catch (err: any) {
+      setError(err?.errors?.[0]?.longMessage ?? err?.message ?? 'Unable to sign in');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const verifySecondFactor = async () => {
+    if (!isLoaded || !secondFactorStrategy) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const result = await signIn.attemptSecondFactor({
+        strategy: secondFactorStrategy,
+        code: verificationCode,
+      } as any);
+      if (result.status !== 'complete') {
+        throw new Error('The verification challenge is not complete.');
+      }
+      await setActive({ session: result.createdSessionId });
+    } catch (err: any) {
+      setError(err?.errors?.[0]?.longMessage ?? err?.message ?? 'Unable to verify code');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar style="auto" />
+      <View style={styles.signInContainer}>
+        <Text style={styles.title}>AI Medical Transcription</Text>
+        <Text style={styles.subtitle}>Sign in with your individual clinic account</Text>
+        {secondFactorStrategy ? (
+          <>
+            <Text style={styles.label}>Verification code</Text>
+            <Text style={styles.hint}>
+              Enter the code from your {secondFactorStrategy.replace('_', ' ')} method.
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={verificationCode}
+              onChangeText={setVerificationCode}
+              autoCapitalize="none"
+              keyboardType={secondFactorStrategy === 'backup_code' ? 'default' : 'number-pad'}
+            />
+            <TouchableOpacity
+              style={styles.button}
+              onPress={verifySecondFactor}
+              disabled={submitting || !isLoaded}
+            >
+              {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Verify</Text>}
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.label}>Email</Text>
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoComplete="email"
+              keyboardType="email-address"
+            />
+            <Text style={styles.label}>Password</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              autoComplete="current-password"
+            />
+            <TouchableOpacity style={styles.button} onPress={submit} disabled={submitting || !isLoaded}>
+              {submitting ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign in</Text>}
+            </TouchableOpacity>
+          </>
+        )}
+        {error && <Text style={styles.errorText}>{error}</Text>}
+      </View>
+    </SafeAreaView>
+  );
+}
+
+function AuthenticatedApp() {
+  const { getToken } = useAuth();
+  const { signOut } = useClerk();
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [healthLoading, setHealthLoading] = useState<boolean>(true);
@@ -64,8 +198,6 @@ export default function App() {
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [analysisLoading, setAnalysisLoading] = useState<boolean>(false);
 
-  const [authToken, setAuthToken] = useState<string>('');
-
   // HTTP upload recording state
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<'idle' | 'recording' | 'uploading'>('idle');
@@ -80,11 +212,18 @@ export default function App() {
   const [liveTotalBytes, setLiveTotalBytes] = useState<number>(0);
   const [liveError, setLiveError] = useState<string | null>(null);
 
+  const authorizationHeaders = async () => {
+    const token = await getToken({ skipCache: true });
+    if (!token) throw new Error('Your session has expired. Please sign in again.');
+    return { Authorization: `Bearer ${token}` };
+  };
+
   useEffect(() => {
     const fetchHealth = async () => {
       try {
+        const headers = await authorizationHeaders();
         const response = await axios.get(`${API_BASE_URL}/api/v1/health`, {
-          headers: authToken ? { 'X-API-Key': authToken } : undefined,
+          headers,
         });
         setHealth(response.data);
       } catch (err: any) {
@@ -95,7 +234,7 @@ export default function App() {
     };
 
     fetchHealth();
-  }, [authToken]);
+  }, [getToken]);
 
   const uploadRecording = async (uri: string) => {
     setUploadError(null);
@@ -117,11 +256,12 @@ export default function App() {
       }
       const queryString = queryParts.length > 0 ? `?${queryParts.join('&')}` : '';
 
+      const authHeaders = await authorizationHeaders();
       const res = await fetch(`${API_BASE_URL}/api/v1/audio/upload${queryString}`, {
         method: 'POST',
         headers: {
           Accept: 'application/json',
-          ...(authToken ? { 'X-API-Key': authToken } : {}),
+          ...authHeaders,
         },
         body: formData,
       });
@@ -207,7 +347,7 @@ export default function App() {
           target_language: targetLanguage || null,
         },
         {
-          headers: authToken ? { 'X-API-Key': authToken } : undefined,
+          headers: await authorizationHeaders(),
         },
       );
       setJob(response.data as TranscriptJob);
@@ -229,7 +369,7 @@ export default function App() {
         `${API_BASE_URL}/api/v1/transcriptions/${job.id}/analyze`,
         undefined,
         {
-          headers: authToken ? { 'X-API-Key': authToken } : undefined,
+          headers: await authorizationHeaders(),
         },
       );
       setAnalysis(response.data as AnalyzeResponse);
@@ -278,14 +418,12 @@ export default function App() {
       });
 
       const wsUrl = buildWsUrl();
+      const token = await getToken({ skipCache: true });
+      if (!token) throw new Error('Your session has expired. Please sign in again.');
       const ws = new (WebSocket as any)(
         wsUrl,
         [],
-        authToken
-          ? {
-              headers: { 'X-API-Key': authToken },
-            }
-          : undefined,
+        { headers: { Authorization: `Bearer ${token}` } },
       );
 
       setLiveStatus('connecting');
@@ -392,20 +530,13 @@ export default function App() {
         <Text style={styles.title}>AI Medical Transcription</Text>
         <Text style={styles.subtitle}>Mobile Client (Android / iOS)</Text>
 
-        {/* Authentication */}
+        {/* Individual session */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Authentication</Text>
-          <Text style={styles.label}>API Key (X-API-Key)</Text>
-          <TextInput
-            style={styles.input}
-            value={authToken}
-            onChangeText={setAuthToken}
-            placeholder="Enter API key or leave blank"
-            secureTextEntry
-          />
-          <Text style={styles.hint}>
-            Used for authenticated backend calls when API key auth is enabled.
-          </Text>
+          <Text style={styles.sectionTitle}>Clinic account</Text>
+          <Text style={styles.hint}>Requests use your short-lived Clerk session token.</Text>
+          <TouchableOpacity style={styles.buttonSecondary} onPress={() => signOut()}>
+            <Text style={styles.buttonSecondaryText}>Sign out</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Backend health */}
@@ -624,6 +755,28 @@ export default function App() {
   );
 }
 
+export default function App() {
+  return (
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} tokenCache={tokenCache}>
+      <MobileAuthGate />
+    </ClerkProvider>
+  );
+}
+
+function MobileAuthGate() {
+  const { isLoaded, isSignedIn } = useAuth();
+  if (!isLoaded) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.signInContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+  return isSignedIn ? <AuthenticatedApp /> : <MobileSignIn />;
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -632,6 +785,11 @@ const styles = StyleSheet.create({
   scrollContent: {
     padding: 24,
     paddingBottom: 48,
+  },
+  signInContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
   },
   title: {
     fontSize: 24,

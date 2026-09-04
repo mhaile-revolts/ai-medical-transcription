@@ -23,20 +23,17 @@ You may have access to one or both of:
 
 Your clinic or project admin will share:
 
-- The **backend API URL** (used by the app configuration).
-- One or more **API keys** (used like a password by the app to talk to the backend).
+- The web or mobile app distribution link.
+- An individual clinic account assigned to the correct clinic and role.
 
-Keep API keys confidential; treat them like passwords.
+Never share your account password or approve a sign-in you did not initiate.
 
 ---
 
 ## 2. Web app (high level)
 
 1. **Open the web URL** provided by your admin (e.g. a `https://...` link).
-2. If prompted for an **API key**:
-   - Go to the **Settings** page.
-   - Paste your API key into the **API Key** or **X-API-Key** field.
-   - Save/apply the settings.
+2. **Sign in** with your individual clinic account.
 3. You can then:
    - View existing **encounters** and their notes.
    - See **transcription jobs** and their analysis.
@@ -54,22 +51,19 @@ Keep API keys confidential; treat them like passwords.
 
 2. **Open the app**
    - On first launch you will see:
-     - A header
-     - An **Authentication** section
-     - Sections for **Backend Health**, **Create Transcription Job**, **Record & Upload Audio**, and **Live Transcription**.
+     - The clinic account sign-in screen.
 
-3. **Enter your API key**
-   - In the **Authentication** section at the top:
-     - Tap the **API Key (X-API-Key)** field.
-     - Paste or type the API key given by your admin.
-     - This key is never shown in plain text after entry.
-   - All subsequent calls (health check, uploads, transcription, analysis) will use this key.
+3. **Sign in**
+   - Enter the email and password for your individual clinic account.
+   - The app keeps the session in the device's secure storage and signs each
+     backend request with a short-lived session token.
 
 4. **Confirm backend is reachable**
    - Scroll to **Backend Health**.
-   - If the backend is reachable and your key is valid, you should see a small JSON block such as:
+   - If the backend is reachable and your account is authorized, you should see a small JSON block such as:
      - `{ "status": "ok", "version": "v1" }`.
-   - If you see an error, double-check your API key or ask your admin.
+   - If you see an authorization error, sign out and back in. Ask your admin to
+     confirm your clinic membership and role if the problem continues.
 
 ---
 

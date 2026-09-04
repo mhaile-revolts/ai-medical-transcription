@@ -135,7 +135,11 @@ async def live_transcription(websocket: WebSocket) -> None:
     """
 
     # Extract optional query parameters for language and session association.
-    current_user = await get_websocket_user(websocket)
+    try:
+        current_user = await get_websocket_user(websocket)
+    except HTTPException as exc:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason=str(exc.detail))
+        return
     qp = websocket.query_params
     tenant_token = set_current_tenant(get_current_tenant())
     language_code = qp.get("language_code")
@@ -150,15 +154,21 @@ async def live_transcription(websocket: WebSocket) -> None:
         except ValueError:
             await websocket.close(code=1008, reason="Invalid encounter_id")
             return
-    if settings.app_env not in {"development", "test"} and encounter_id is None:
-        await websocket.close(code=1008, reason="encounter_id is required")
-        return
     if encounter_id is not None:
         encounter = encounter_service.get_encounter(encounter_id)
         if encounter is None:
             await websocket.close(code=1008, reason="Encounter not found")
             return
         ensure_can_edit_encounter(current_user, encounter.clinician_id)
+    else:
+        # A mobile capture may begin before an encounter exists. Create it only
+        # after authentication and assign it to the verified clinician so the
+        # caller cannot select another clinician or tenant.
+        encounter = encounter_service.create_encounter(
+            clinician_id=str(current_user.id),
+            title="Mobile live transcription",
+        )
+        encounter_id = encounter.id
     if session_id_str:
         try:
             session_id = UUID(session_id_str)
@@ -290,7 +300,13 @@ async def live_transcription(websocket: WebSocket) -> None:
                         # payload.
                         job_payload = job.model_dump(mode="json")
 
-                    await websocket.send_json({"type": "final", "job": job_payload})
+                    await websocket.send_json(
+                        {
+                            "type": "final",
+                            "job": job_payload,
+                            "encounter_id": str(encounter_id),
+                        }
+                    )
 
                     audit_service.log_event(
                         action="live_transcription_complete",

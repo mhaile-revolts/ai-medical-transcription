@@ -34,8 +34,8 @@ It focuses on the FastAPI backend and the React frontend in `src/frontend/web`.
 
 - Expo React Native app under `src/frontend/mobile`.
 - Talks to backend via `EXPO_PUBLIC_API_BASE_URL` (set per build profile in `eas.json`).
-- The legacy mobile API-key screen is development-only. Do not distribute a
-  PHI-capable mobile build until it uses individual Clerk bearer tokens.
+- Uses individual Clerk sessions stored in the platform secure store.
+- Sends short-lived Clerk bearer tokens for HTTP and WebSocket requests.
 - Supports:
   - HTTP audio upload via `/api/v1/audio/upload`.
   - Live WebSocket transcription via `/api/v1/audio/ws` (with partial transcripts).
@@ -142,6 +142,7 @@ Key settings:
 ### Mobile (`src/frontend/mobile`)
 
 - `EXPO_PUBLIC_API_BASE_URL` – base URL of the backend used by the mobile app. This is typically set via `env` in `eas.json` per profile (e.g., staging vs pilot) but can also be provided at runtime for local dev.
+- `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` – the environment-specific Clerk publishable key. Use the development Clerk key for local/staging builds and the production Clerk key for pilot builds. Never embed the Clerk secret key.
 
 ---
 
@@ -235,8 +236,11 @@ Key settings:
 3. **Backend URL & auth**
 
    - By default the app uses `EXPO_PUBLIC_API_BASE_URL` if set, otherwise `http://localhost:8000`.
-   - The current mobile authentication UI is retained only for synthetic local
-     development and is rejected by staging/production APIs.
+   - Set `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` before starting Expo.
+   - Sign in with an individual Clerk account whose verified session claims include
+     `tenant_id` and `role` (or `org_id` and `org_role`).
+   - The app stores the session in the device secure store and obtains a fresh
+     short-lived bearer token for every HTTP request and WebSocket connection.
 
 4. **Audio flows**
 
@@ -321,9 +325,12 @@ Staging mobile builds are typically distributed internally (APK / TestFlight) an
 
 1. **Configure `eas.json`**
 
-   In `src/frontend/mobile/eas.json`, set:
+   The checked-in preview profile selects the EAS `preview` environment. In
+   that EAS environment, configure:
 
-   - `build.preview.env.EXPO_PUBLIC_API_BASE_URL=https://staging-clinic-api.example.com`
+   - `EXPO_PUBLIC_API_BASE_URL=https://staging-clinic-api.example.com`
+   - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` with the development/staging Clerk
+     publishable key.
 
 2. **Build Android APK (internal)**
 
@@ -412,15 +419,13 @@ This is where you must be careful: most work here is infra and policy, not code.
 
 Pilot mobile builds should target the pilot API and be distributed only to approved clinician devices.
 
-The current mobile client is **not approved for PHI** because it still uses a
-shared API-key flow that production rejects. Complete individual Clerk mobile
-authentication before following the build steps below.
-
 1. **Configure `eas.json`**
 
-   In `src/frontend/mobile/eas.json`, set:
+   The checked-in production profile selects the EAS `production` environment.
+   In that EAS environment, configure:
 
-   - `build.production.env.EXPO_PUBLIC_API_BASE_URL=https://pilot-clinic-api.example.com`
+   - `EXPO_PUBLIC_API_BASE_URL=https://pilot-clinic-api.example.com`
+   - `EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY` with the production Clerk publishable key.
 
 2. **Build Android AAB (Play Store) or managed distribution**
 

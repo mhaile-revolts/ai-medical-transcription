@@ -4,13 +4,7 @@
     "slug": "ai-medical-transcription-mobile",
     "version": "0.1.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
     "ios": {
       "bundleIdentifier": "com.motorchain.aimedicaltranscription",
       "supportsTablet": true,
@@ -19,19 +13,18 @@
       }
     },
     "android": {
-      "package": "com.motorchain.aimedicaltranscription",
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      }
+      "package": "com.motorchain.aimedicaltranscription"
     },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    },
+    "web": {},
     "extra": {
       "eas": {
         "projectId": "efdcfaf7-9884-44da-9378-36ebf68429a3"
       }
-    }
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-status-bar",
+      "expo-web-browser"
+    ]
   }
 }

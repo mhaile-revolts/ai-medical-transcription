@@ -75,6 +75,7 @@ async def get_api_key(
         tenant = claims.get("org_id") or claims.get("tenant_id")
         if not subject or not tenant:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="JWT tenant membership is required")
+        _role(claims.get("org_role") or claims.get("role"))
         _current_subject.set(str(subject))
         _current_claims.set(claims)
         set_current_tenant(str(tenant))
@@ -123,6 +124,7 @@ async def get_websocket_user(websocket: WebSocket) -> User:
         tenant = claims.get("org_id") or claims.get("tenant_id")
         if not subject or not tenant:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="JWT tenant membership is required")
+        _role(claims.get("org_role") or claims.get("role"))
     elif _development_override_allowed():
         subject = websocket.headers.get("X-Test-Subject", "development-user")
         tenant = (
