@@ -1,0 +1,1 @@
+- [SMART token boundary](smart-token-boundary.md) — Keep OCHIN authorization separate from Clerk; SMART tokens stay encrypted server-side and clinician/tenant-bound.

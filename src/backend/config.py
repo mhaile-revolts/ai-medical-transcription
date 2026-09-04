@@ -131,6 +131,22 @@ class Settings:
     ochin_smart_fhir_base_url: Optional[str] = os.getenv("OCHIN_SMART_FHIR_BASE_URL")
     ochin_smart_issuer: Optional[str] = os.getenv("OCHIN_SMART_ISSUER")
     ochin_smart_client_id: Optional[str] = os.getenv("OCHIN_SMART_CLIENT_ID")
+    ochin_smart_redirect_uri: Optional[str] = os.getenv("OCHIN_SMART_REDIRECT_URI")
+    ochin_smart_authorize_url: Optional[str] = os.getenv("OCHIN_SMART_AUTHORIZE_URL")
+    ochin_smart_token_url: Optional[str] = os.getenv("OCHIN_SMART_TOKEN_URL")
+    ochin_smart_jwks_url: Optional[str] = os.getenv("OCHIN_SMART_JWKS_URL")
+    ochin_smart_revoke_url: Optional[str] = os.getenv("OCHIN_SMART_REVOKE_URL")
+    ochin_smart_scopes: str = os.getenv(
+        "OCHIN_SMART_SCOPES",
+        "openid fhirUser offline_access patient/Patient.read patient/Encounter.read",
+    )
+    ochin_smart_required_scopes: str = os.getenv(
+        "OCHIN_SMART_REQUIRED_SCOPES", "openid fhirUser patient/Patient.read patient/Encounter.read"
+    )
+    smart_token_encryption_key: Optional[str] = os.getenv("SMART_TOKEN_ENCRYPTION_KEY") or os.getenv("SESSION_SECRET")
+    ochin_smart_mobile_return_uri: str = os.getenv(
+        "OCHIN_SMART_MOBILE_RETURN_URI", "aimedicaltranscription://smart-complete"
+    )
 
     # Retention is an operational control; a worker must use these values to
     # purge expired PHI.  Zero is never accepted outside development/test.

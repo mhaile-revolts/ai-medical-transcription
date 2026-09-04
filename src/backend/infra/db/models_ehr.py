@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import JSON, Boolean, DateTime, Integer, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, LargeBinary, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.backend.infra.db.models import Base
@@ -46,3 +46,20 @@ class EHRMessageORM(Base):
     __table_args__ = (
         UniqueConstraint("tenant_id", "connection_id", "idempotency_key", name="uq_ehr_message_idempotency"),
     )
+
+
+class SmartTokenORM(Base):
+    __tablename__ = "smart_tokens"
+    tenant_id: Mapped[str] = mapped_column(String, primary_key=True)
+    clinician_id: Mapped[str] = mapped_column(String, primary_key=True)
+    encrypted_token: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    expires_at: Mapped[float] = mapped_column(Float, nullable=False)
+    practitioner_id: Mapped[str] = mapped_column(String, nullable=False)
+    scope: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class SmartAuthorizationStateORM(Base):
+    __tablename__ = "smart_authorization_states"
+    state_key: Mapped[str] = mapped_column(String, primary_key=True)
+    encrypted_transaction: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    expires_at: Mapped[float] = mapped_column(Float, nullable=False, index=True)

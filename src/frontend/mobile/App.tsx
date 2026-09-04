@@ -13,6 +13,7 @@ import axios from 'axios';
 import { StatusBar } from 'expo-status-bar';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as WebBrowser from 'expo-web-browser';
 import {
   ClerkProvider,
   useAuth,
@@ -82,6 +83,11 @@ interface EHRExportStatus {
   status: 'pending' | 'delivered' | 'failed';
   retry_count: number;
   last_error?: string | null;
+}
+
+interface SmartAuthorizationStatus {
+  authorized: boolean;
+  practitioner_id?: string | null;
 }
 
 function MobileSignIn() {
@@ -241,6 +247,8 @@ function AuthenticatedApp() {
   const [patientLoading, setPatientLoading] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [patientError, setPatientError] = useState<string | null>(null);
+  const [smartStatus, setSmartStatus] = useState<SmartAuthorizationStatus>({ authorized: false });
+  const [smartAuthorizing, setSmartAuthorizing] = useState(false);
   const [doctorApproval, setDoctorApproval] = useState(false);
   const [exportStatus, setExportStatus] = useState<EHRExportStatus | null>(null);
   const [exportLoading, setExportLoading] = useState(false);
@@ -260,6 +268,29 @@ function AuthenticatedApp() {
     const token = await getToken({ skipCache: true });
     if (!token) throw new Error('Your session has expired. Please sign in again.');
     return { Authorization: `Bearer ${token}` };
+  };
+
+  const refreshSmartStatus = async () => {
+    const response = await axios.get<SmartAuthorizationStatus>(
+      `${API_BASE_URL}/api/v1/ehr/smart/status`, { headers: await authorizationHeaders() },
+    );
+    setSmartStatus(response.data);
+  };
+
+  const authorizeOchin = async () => {
+    setSmartAuthorizing(true);
+    setPatientError(null);
+    try {
+      const response = await axios.post<{ authorization_url: string }>(
+        `${API_BASE_URL}/api/v1/ehr/smart/authorize`, {}, { headers: await authorizationHeaders() },
+      );
+      await WebBrowser.openAuthSessionAsync(response.data.authorization_url, 'aimedicaltranscription://smart-complete');
+      await refreshSmartStatus();
+    } catch (err: any) {
+      setPatientError(String(err?.response?.data?.detail || err?.message || 'Unable to authorize OCHIN.'));
+    } finally {
+      setSmartAuthorizing(false);
+    }
   };
 
   const resetPatientWorkflow = () => {
@@ -373,6 +404,7 @@ function AuthenticatedApp() {
     };
 
     fetchHealth();
+    refreshSmartStatus().catch(() => setSmartStatus({ authorized: false }));
   }, [getToken]);
 
   const uploadRecording = async (uri: string) => {
@@ -728,6 +760,14 @@ function AuthenticatedApp() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Clinic account</Text>
           <Text style={styles.hint}>Requests use your short-lived Clerk session token.</Text>
+          <Text style={styles.hint}>
+            OCHIN SMART: {smartStatus.authorized ? `Authorized as Practitioner ${smartStatus.practitioner_id}` : 'Not authorized'}
+          </Text>
+          {!smartStatus.authorized && (
+            <TouchableOpacity style={styles.button} onPress={authorizeOchin} disabled={smartAuthorizing}>
+              {smartAuthorizing ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Authorize OCHIN Epic</Text>}
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.buttonSecondary} onPress={() => signOut()}>
             <Text style={styles.buttonSecondaryText}>Sign out</Text>
           </TouchableOpacity>

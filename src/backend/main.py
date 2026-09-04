@@ -21,7 +21,7 @@ from src.backend.api.v1.routes_patients import router as patients_router_v1
 from src.backend.api.v1.routes_analytics import router as analytics_router_v1
 from src.backend.api.v1.routes_scribe import router as scribe_router_v1
 from src.backend.api.v1.routes_culture import router as culture_router_v1
-from src.backend.api.v1.routes_ehr import router as ehr_router_v1
+from src.backend.api.v1.routes_ehr import callback_router as ehr_callback_router_v1, router as ehr_router_v1
 from src.backend.config import settings
 from src.backend.infra.db.bootstrap import init_sql_repositories
 from src.backend.services.audit.service import configure_audit_sink
@@ -51,6 +51,14 @@ def _validate_security_configuration() -> None:
         failures.append("PHI and audit retention periods must be positive")
     if not settings.audit_log_path:
         failures.append("AUDIT_LOG_PATH is required")
+    smart_values = (
+        settings.ochin_smart_fhir_base_url, settings.ochin_smart_issuer,
+        settings.ochin_smart_client_id, settings.ochin_smart_redirect_uri,
+        settings.ochin_smart_authorize_url, settings.ochin_smart_token_url,
+        settings.ochin_smart_jwks_url, settings.smart_token_encryption_key,
+    )
+    if not all(smart_values):
+        failures.append("complete OCHIN SMART authorization configuration is required")
     if failures:
         raise RuntimeError("Unsafe deployment configuration: " + "; ".join(failures))
 
@@ -110,3 +118,4 @@ app.include_router(analytics_router_v1, prefix="/api/v1")
 app.include_router(scribe_router_v1, prefix="/api/v1")
 app.include_router(culture_router_v1, prefix="/api/v1")
 app.include_router(ehr_router_v1, prefix="/api/v1")
+app.include_router(ehr_callback_router_v1, prefix="/api/v1")

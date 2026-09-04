@@ -2,6 +2,7 @@
   "expo": {
     "name": "AI Medical Transcription",
     "slug": "ai-medical-transcription-mobile",
+    "scheme": "aimedicaltranscription",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",

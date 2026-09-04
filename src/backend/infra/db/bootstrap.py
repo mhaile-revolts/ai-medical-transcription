@@ -16,7 +16,7 @@ from src.backend.services.users.service import user_service
 from src.backend.services.conversation.service import conversation_service
 from src.backend.infra.storage.audio import configure_postgres_audio_storage
 
-REQUIRED_SCHEMA_REVISION = "0004_durable_ehr_outbox"
+REQUIRED_SCHEMA_REVISION = "0005_secure_smart_tokens"
 
 
 def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma: no cover - side-effectful wiring
@@ -43,7 +43,8 @@ def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma
         connection.execute(text("SELECT 1"))
     required_tables = {
         "encounters", "clinical_notes", "transcription_jobs", "users", "audio_blobs",
-        "conversation_sessions", "ehr_connections", "ehr_messages",
+        "conversation_sessions", "ehr_connections", "ehr_messages", "smart_tokens",
+        "smart_authorization_states",
     }
     missing_tables = required_tables - set(inspect(engine).get_table_names())
     if missing_tables:

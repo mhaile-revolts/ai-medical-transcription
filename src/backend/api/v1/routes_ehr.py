@@ -4,7 +4,8 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, HttpUrl
 
 from src.backend.domain.models.ehr_connection import EHRConnection
@@ -20,6 +21,7 @@ from src.backend.services.ehr.smart_fhir_service import (
     smart_fhir_service,
 )
 from src.backend.services.audit.service import audit_service
+from src.backend.config import settings
 
 
 router = APIRouter(
@@ -27,6 +29,7 @@ router = APIRouter(
     tags=["ehr"],
     dependencies=[Depends(get_api_key), Depends(tenant_dependency)],
 )
+callback_router = APIRouter(prefix="/ehr", tags=["ehr"])
 
 
 class EHRConnectionCreateRequest(BaseModel):
@@ -85,6 +88,59 @@ class SmartConfirmRequest(BaseModel):
     consent_obtained: bool
     consent_method: str
     consent_version: str
+
+
+class SmartAuthorizationResponse(BaseModel):
+    authorization_url: str
+
+
+class SmartAuthorizationStatus(BaseModel):
+    authorized: bool
+    practitioner_id: Optional[str] = None
+
+
+@router.post("/smart/authorize", response_model=SmartAuthorizationResponse)
+async def smart_authorize(current_user=Depends(get_current_user)) -> SmartAuthorizationResponse:
+    ensure_is_doctor(current_user)
+    try:
+        url = smart_fhir_service.begin_authorization(get_current_tenant(), str(current_user.id))
+    except SmartFHIRUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return SmartAuthorizationResponse(authorization_url=url)
+
+
+@callback_router.get("/smart/callback", include_in_schema=False)
+async def smart_callback(
+    state: Optional[str] = Query(None),
+    code: Optional[str] = Query(None),
+    error: Optional[str] = Query(None),
+) -> RedirectResponse:
+    if error or not state or not code:
+        if state:
+            smart_fhir_service.abandon_authorization(state)
+        return RedirectResponse(f"{settings.ochin_smart_mobile_return_uri}?status=failed", status_code=302)
+    try:
+        await smart_fhir_service.complete_authorization(state, code)
+    except SmartFHIRUnavailable:
+        return RedirectResponse(f"{settings.ochin_smart_mobile_return_uri}?status=failed", status_code=302)
+    return RedirectResponse(f"{settings.ochin_smart_mobile_return_uri}?status=authorized", status_code=302)
+
+
+@router.get("/smart/status", response_model=SmartAuthorizationStatus)
+async def smart_status(current_user=Depends(get_current_user)) -> SmartAuthorizationStatus:
+    ensure_is_doctor(current_user)
+    return SmartAuthorizationStatus(
+        **smart_fhir_service.authorization_status(get_current_tenant(), str(current_user.id))
+    )
+
+
+@router.delete("/smart/authorization", status_code=204)
+async def smart_revoke(current_user=Depends(get_current_user)) -> None:
+    ensure_is_doctor(current_user)
+    try:
+        await smart_fhir_service.revoke(get_current_tenant(), str(current_user.id))
+    except SmartFHIRUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @router.get("/connections", response_model=List[EHRConnectionResponse])
@@ -216,11 +272,12 @@ async def retry_export(message_id: UUID, current_user=Depends(get_current_user))
 
 @router.get("/smart/patients/{patient_id}", response_model=SmartPatientResponse)
 async def smart_patient_lookup(patient_id: str, current_user=Depends(get_current_user)) -> SmartPatientResponse:
+    ensure_is_doctor(current_user)
     try:
-        patient = await smart_fhir_service.get_patient(patient_id)
+        patient = await smart_fhir_service.get_patient(patient_id, get_current_tenant(), str(current_user.id))
     except SmartFHIRUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    audit_service.log_event(action="smart_patient_lookup", resource_type="patient", resource_id=patient.id)
+    audit_service.log_event(action="smart_patient_lookup", resource_type="patient")
     return SmartPatientResponse(
         id=patient.id, display_name=patient.display_name, birth_date=patient.birth_date,
         sex=patient.sex, source=patient.source,
@@ -229,14 +286,15 @@ async def smart_patient_lookup(patient_id: str, current_user=Depends(get_current
 
 @router.get("/smart/patients/{patient_id}/encounters", response_model=List[SmartEncounterResponse])
 async def smart_active_encounters(patient_id: str, current_user=Depends(get_current_user)) -> List[SmartEncounterResponse]:
+    ensure_is_doctor(current_user)
     try:
         # Read the patient first so an encounter query cannot confirm an
         # identifier that the configured server does not recognize.
-        await smart_fhir_service.get_patient(patient_id)
-        encounters = await smart_fhir_service.active_encounters(patient_id)
+        await smart_fhir_service.get_patient(patient_id, get_current_tenant(), str(current_user.id))
+        encounters = await smart_fhir_service.active_encounters(patient_id, get_current_tenant(), str(current_user.id))
     except SmartFHIRUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    audit_service.log_event(action="smart_encounter_lookup", resource_type="patient", resource_id=patient_id,
+    audit_service.log_event(action="smart_encounter_lookup", resource_type="patient",
                             extra={"count": len(encounters)})
     return [SmartEncounterResponse(id=e.id, status=e.status, type=e.type, period_start=e.period_start) for e in encounters]
 
@@ -245,13 +303,14 @@ async def smart_active_encounters(patient_id: str, current_user=Depends(get_curr
 async def confirm_smart_encounter(
     payload: SmartConfirmRequest, current_user=Depends(get_current_user)
 ) -> ClinicalEncounter:
+    ensure_is_doctor(current_user)
     if not payload.consent_obtained:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Recorded patient consent is required")
     if not payload.consent_method.strip() or not payload.consent_version.strip():
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Consent method and version are required")
     try:
-        patient = await smart_fhir_service.get_patient(payload.patient_id)
-        active = await smart_fhir_service.active_encounters(payload.patient_id)
+        patient = await smart_fhir_service.get_patient(payload.patient_id, get_current_tenant(), str(current_user.id))
+        active = await smart_fhir_service.active_encounters(payload.patient_id, get_current_tenant(), str(current_user.id))
     except SmartFHIRUnavailable as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     external = next((item for item in active if item.id == payload.external_encounter_id), None)
@@ -275,6 +334,5 @@ async def confirm_smart_encounter(
         encounter_repository.save(encounter)
     audit_service.log_event(
         action="smart_encounter_confirmed", resource_type="clinical_encounter", resource_id=str(encounter.id),
-        extra={"patient_id": patient.id, "external_encounter_id": external.id},
     )
     return encounter
