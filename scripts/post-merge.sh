@@ -7,7 +7,9 @@ python -m pip install \
   --upgrade \
   --target ".pythonlibs/lib/python$(python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages" \
   -r requirements.txt
-npm ci --no-audit --no-fund --prefix src/frontend/web
+# Use install rather than ci so dependency changes merged by task agents also
+# refresh the lockfile instead of making the reconciliation hook fail.
+npm install --no-audit --no-fund --prefix src/frontend/web
 npm run build --prefix src/frontend/web
 
 if [[ "${APP_MODE:-demo}" != "demo" ]]; then
