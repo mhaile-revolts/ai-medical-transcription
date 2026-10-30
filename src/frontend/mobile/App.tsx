@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  AppState,
   View,
   Text,
   StyleSheet,
@@ -32,6 +33,28 @@ if (!configuredClerkPublishableKey) {
   throw new Error('Missing EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY');
 }
 const CLERK_PUBLISHABLE_KEY: string = configuredClerkPublishableKey;
+
+async function discardUnsubmittedRecording(recording: Audio.Recording | null) {
+  if (!recording) return;
+  let uri: string | null = null;
+  try {
+    await recording.stopAndUnloadAsync();
+  } catch {
+    // The native recorder may already have stopped after an OS interruption.
+  }
+  try {
+    uri = recording.getURI();
+  } catch {
+    // Nothing else can be recovered if the native recorder has no local URI.
+  }
+  if (uri) {
+    try {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+    } catch {
+      // Keep interruption handling reliable even if temporary-file cleanup fails.
+    }
+  }
+}
 
 interface HealthResponse {
   status?: string;
@@ -238,6 +261,7 @@ function AuthenticatedApp() {
 
   // HTTP upload recording state
   const [recording, setRecording] = useState<Audio.Recording | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
   const [recordingStatus, setRecordingStatus] = useState<'idle' | 'recording' | 'uploading'>('idle');
   const [uploadResult, setUploadResult] = useState<IngestAudioResponse | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -266,6 +290,9 @@ function AuthenticatedApp() {
   // WebSocket live transcription state
   const [liveWs, setLiveWs] = useState<any | null>(null);
   const [liveRecording, setLiveRecording] = useState<Audio.Recording | null>(null);
+  const liveRecordingRef = useRef<Audio.Recording | null>(null);
+  const liveWsRef = useRef<any | null>(null);
+  const appStateRef = useRef(AppState.currentState);
   const [liveStatus, setLiveStatus] = useState<'idle' | 'connecting' | 'recording' | 'sending'>('idle');
   const [livePartialText, setLivePartialText] = useState<string | null>(null);
   const [liveTotalBytes, setLiveTotalBytes] = useState<number>(0);
@@ -414,6 +441,51 @@ function AuthenticatedApp() {
     refreshSmartStatus().catch(() => setSmartStatus({ authorized: false }));
   }, [getToken]);
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+      if (nextState === 'active' || previousState !== 'active') return;
+
+      const interruptedRecording = recordingRef.current;
+      const interruptedLiveRecording = liveRecordingRef.current;
+      const pendingSocket = liveWsRef.current;
+
+      if (interruptedRecording) {
+        recordingRef.current = null;
+        setRecording(null);
+        setRecordingStatus('idle');
+        setUploadError('Recording stopped because Clinic Scribe left the foreground. The partial audio was not uploaded. Confirm the patient and consent before recording again.');
+        void discardUnsubmittedRecording(interruptedRecording);
+      }
+
+      if (interruptedLiveRecording) {
+        liveRecordingRef.current = null;
+        setLiveRecording(null);
+        setLiveStatus('idle');
+        setLiveError('Live recording stopped because Clinic Scribe left the foreground. The partial audio was discarded and not sent. Confirm the patient and consent before recording again.');
+        void discardUnsubmittedRecording(interruptedLiveRecording);
+        if (pendingSocket) {
+          try {
+            pendingSocket.close();
+          } catch {
+            // The operating system may already have closed the socket.
+          }
+        }
+      } else if (pendingSocket && pendingSocket.readyState === WebSocket.CONNECTING) {
+        setLiveStatus('idle');
+        setLiveError('The live session was interrupted before recording began. Start again when the app is active.');
+        try {
+          pendingSocket.close();
+        } catch {
+          // The operating system may already have closed the socket.
+        }
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
   const uploadRecording = async (uri: string) => {
     if (!localEncounterId) {
       setUploadError('Confirm the patient, active encounter, and recording consent before uploading.');
@@ -468,6 +540,10 @@ function AuthenticatedApp() {
       setUploadError('Recording is locked until the patient and encounter are confirmed with consent.');
       return;
     }
+    if (liveRecordingRef.current || liveWsRef.current) {
+      setUploadError('Stop the live transcription session before starting another recording.');
+      return;
+    }
     setUploadError(null);
     setUploadResult(null);
     try {
@@ -485,10 +561,17 @@ function AuthenticatedApp() {
       const rec = new Audio.Recording();
       await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
       await rec.startAsync();
+      if (AppState.currentState !== 'active') {
+        await discardUnsubmittedRecording(rec);
+        setUploadError('Recording did not start because the app is not active. Return to Clinic Scribe and try again.');
+        return;
+      }
+      recordingRef.current = rec;
       setRecording(rec);
       setRecordingStatus('recording');
     } catch (err: any) {
       setUploadError(err?.message ?? 'Failed to start recording');
+      recordingRef.current = null;
       setRecording(null);
       setRecordingStatus('idle');
     }
@@ -500,6 +583,7 @@ function AuthenticatedApp() {
       setRecordingStatus('uploading');
       await recording.stopAndUnloadAsync();
       const uri = recording.getURI();
+      recordingRef.current = null;
       setRecording(null);
       if (!uri) {
         throw new Error('No recording URI available');
@@ -507,6 +591,9 @@ function AuthenticatedApp() {
       await uploadRecording(uri);
       setRecordingStatus('idle');
     } catch (err: any) {
+      recordingRef.current = null;
+      setRecording(null);
+      void discardUnsubmittedRecording(recording);
       setUploadError(err?.message ?? 'Failed to stop or upload recording');
       setRecordingStatus('idle');
     }
@@ -652,6 +739,10 @@ function AuthenticatedApp() {
       setLiveError('Recording is locked until the patient and encounter are confirmed with consent.');
       return;
     }
+    if (recordingRef.current) {
+      setLiveError('Stop the current recording before starting live transcription.');
+      return;
+    }
     setLiveError(null);
     setLivePartialText(null);
     setLiveTotalBytes(0);
@@ -680,15 +771,24 @@ function AuthenticatedApp() {
       setLiveStatus('connecting');
 
       ws.onopen = async () => {
+        let rec: Audio.Recording | null = null;
         try {
-          const rec = new Audio.Recording();
+          rec = new Audio.Recording();
           await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
           await rec.startAsync();
+          if (AppState.currentState !== 'active' || ws.readyState !== WebSocket.OPEN) {
+            await discardUnsubmittedRecording(rec);
+            ws.close();
+            return;
+          }
+          liveRecordingRef.current = rec;
           setLiveRecording(rec);
           setLiveStatus('recording');
         } catch (err: any) {
+          await discardUnsubmittedRecording(rec);
           setLiveError(err?.message ?? 'Failed to start live recording');
           setLiveStatus('idle');
+          liveRecordingRef.current = null;
           setLiveRecording(null);
           ws.close();
         }
@@ -713,18 +813,32 @@ function AuthenticatedApp() {
 
       ws.onerror = () => {
         setLiveError('WebSocket error');
+        try {
+          ws.close();
+        } catch {
+          // The socket may already be closed.
+        }
       };
 
       ws.onclose = () => {
+        liveWsRef.current = null;
         setLiveStatus('idle');
+        const interruptedRecording = liveRecordingRef.current;
+        liveRecordingRef.current = null;
         setLiveRecording(null);
         setLiveWs(null);
+        if (interruptedRecording) {
+          setLiveError('The live connection ended before the recording was sent. The partial audio was discarded.');
+          void discardUnsubmittedRecording(interruptedRecording);
+        }
       };
 
+      liveWsRef.current = ws;
       setLiveWs(ws);
     } catch (err: any) {
       setLiveError(err?.message ?? 'Failed to start live transcription');
       setLiveStatus('idle');
+      liveRecordingRef.current = null;
       setLiveRecording(null);
       if (liveWs) {
         try {
@@ -734,15 +848,29 @@ function AuthenticatedApp() {
         }
       }
       setLiveWs(null);
+      liveWsRef.current = null;
     }
   };
 
   const stopLiveTranscription = async () => {
-    if (!liveRecording || !liveWs) return;
+    if (!liveRecording || !liveWs) {
+      if (liveStatus === 'connecting' && liveWs) {
+        liveWsRef.current = null;
+        setLiveWs(null);
+        setLiveStatus('idle');
+        try {
+          liveWs.close();
+        } catch {
+          // The socket may already be closed.
+        }
+      }
+      return;
+    }
     try {
       setLiveStatus('sending');
       await liveRecording.stopAndUnloadAsync();
       const uri = liveRecording.getURI();
+      liveRecordingRef.current = null;
       setLiveRecording(null);
       if (!uri) {
         throw new Error('No recording URI available');
@@ -755,6 +883,7 @@ function AuthenticatedApp() {
     } catch (err: any) {
       setLiveError(err?.message ?? 'Failed to stop or send live recording');
       setLiveStatus('idle');
+      void discardUnsubmittedRecording(liveRecording);
       if (liveWs) {
         try {
           liveWs.close();
@@ -762,6 +891,8 @@ function AuthenticatedApp() {
           // ignore
         }
       }
+      liveRecordingRef.current = null;
+      liveWsRef.current = null;
       setLiveWs(null);
     }
   };
@@ -1008,7 +1139,7 @@ function AuthenticatedApp() {
           <TouchableOpacity
             style={styles.button}
             onPress={handleToggleRecording}
-            disabled={recordingStatus === 'uploading' || !localEncounterId}
+            disabled={recordingStatus === 'uploading' || liveStatus !== 'idle' || !localEncounterId}
           >
             {recordingStatus === 'recording' ? (
               <Text style={styles.buttonText}>Stop & Upload</Text>
@@ -1043,7 +1174,7 @@ function AuthenticatedApp() {
           <TouchableOpacity
             style={styles.button}
             onPress={handleToggleLive}
-            disabled={liveStatus === 'sending' || !localEncounterId}
+            disabled={liveStatus === 'sending' || recordingStatus !== 'idle' || !localEncounterId}
           >
             {liveStatus === 'recording' || liveStatus === 'connecting' ? (
               <Text style={styles.buttonText}>Stop & Send</Text>
