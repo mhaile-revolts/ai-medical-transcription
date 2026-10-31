@@ -38,7 +38,10 @@ It focuses on the FastAPI backend and the React frontend in `src/frontend/web`.
 - Sends short-lived Clerk bearer tokens for HTTP and WebSocket requests.
 - Supports:
   - HTTP audio upload via `/api/v1/audio/upload`.
-  - Live WebSocket transcription via `/api/v1/audio/ws` (with partial transcripts).
+  - Live WebSocket capture via `/api/v1/audio/ws`. With ElevenLabs, multilingual
+    transcription is submitted once after recording ends to avoid repeated
+    external processing; detected language and confidence appear with the
+    completed job.
 
 ---
 
@@ -49,7 +52,9 @@ It focuses on the FastAPI backend and the React frontend in `src/frontend/web`.
 Key settings:
 
 - **ASR / NLP**
-  - `ASR_BACKEND` – e.g. `"demo"`, `"whisper"`, `"llama"` (stub for offline/on-device LLaMA-style models), or `"multi_accent"` (accent-aware wrapper around the default backend).
+  - `ASR_BACKEND` – `"demo"`, `"whisper"`, `"llama"` (stub for offline/on-device LLaMA-style models), `"multi_accent"` (accent-aware wrapper around the default backend), or `"elevenlabs"` (connected Scribe v2 Medical).
+  - `ELEVENLABS_SCRIBE_MODEL` – model ID (default: `scribe_v2_medical`).
+  - `ELEVENLABS_BAA_CONFIRMED=true` and `ELEVENLABS_ZERO_RETENTION_ENABLED=true` – both are required before selecting ElevenLabs. Every request asks for Zero Retention Mode; the organization must separately verify its ElevenLabs Enterprise BAA and account configuration.
   - `TRANSLATION_BACKEND` – e.g. `"demo"` or `"llm"`.
   - `NLP_NER_BACKEND`, `NLP_CODING_BACKEND`, `NLP_SOAP_BACKEND` – core NLP pipeline knobs:
     - `NLP_NER_BACKEND` – `"demo"` (default), `"med7"`, or `"clinicalbert"`.
@@ -245,7 +250,8 @@ Key settings:
 4. **Audio flows**
 
    - HTTP upload: records audio and POSTs to `/api/v1/audio/upload`.
-   - Live transcription: opens a WebSocket to `/api/v1/audio/ws`, streams audio, and displays partial transcripts in real time.
+    - Live capture: opens a WebSocket to `/api/v1/audio/ws` and streams audio. Some local/demo backends provide partial transcripts; ElevenLabs batch transcription runs on the finalized recording.
+    - Leave the source-language override blank for automatic detection. A language switch in the recording does not require restarting capture, but the detected language appears after transcription completes rather than continuously during speech.
 
 ---
 
@@ -296,8 +302,9 @@ Staging should mirror pilot as closely as possible, but use only synthetic or de
 
 4. **ASR / NLP backends**
 
-   - For staging, you can still use `"demo"` backends, or point to non‑PHI model instances.
-   - Set `ASR_BACKEND`, `NLP_*_BACKEND` as needed.
+    - For staging, use synthetic/de-identified audio with `"demo"` or a configured non-PHI model.
+    - ElevenLabs staging still requires the account's Enterprise BAA and Zero Retention Mode confirmation because the app always requests `enable_logging=false`.
+    - Set `ASR_BACKEND`, `NLP_*_BACKEND` as needed.
 
 ### 4.2. Frontend – staging
 
@@ -381,6 +388,7 @@ This is where you must be careful: most work here is infra and policy, not code.
      - Have appropriate agreements (e.g. BAA).
      - Have settings that avoid training on your data by default.
    - For maximum control, consider self‑hosted ASR and NLP in the same private network.
+    - For ElevenLabs, use Scribe v2 Medical, verify Enterprise BAA coverage and Zero Retention Mode, then set both `ELEVENLABS_BAA_CONFIRMED=true` and `ELEVENLABS_ZERO_RETENTION_ENABLED=true`. The application refuses to start with this provider unless both are set. Use it only where the Replit connector identity is available.
 
 4. **Logging and audit**
 

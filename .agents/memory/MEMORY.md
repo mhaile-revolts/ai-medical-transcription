@@ -1,1 +1,2 @@
 - [SMART token boundary](smart-token-boundary.md) — Keep OCHIN authorization separate from Clerk; SMART tokens stay encrypted server-side and clinician/tenant-bound.
+- [Mobile EAS build isolation](mobile-eas-build-isolation.md) — Build the Expo app from an isolated mobile-only archive until the repository is configured as an npm workspace.

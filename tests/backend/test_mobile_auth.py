@@ -11,6 +11,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from src.backend.config import settings
 from src.backend.main import app
+from src.backend.services.encounters.service import encounter_service
 
 
 ISSUER = "https://identity.mobile.test"
@@ -96,6 +97,38 @@ async def test_mobile_expired_bearer_token_is_rejected(mobile_signing_key) -> No
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 
+@pytest.mark.asyncio
+async def test_mobile_upload_duplicate_capture_id_returns_original_job(
+    mobile_signing_key, monkeypatch
+) -> None:
+    token = mobile_token(
+        mobile_signing_key,
+        subject="mobile-idempotent-upload-owner",
+        tenant="mobile-idempotent-upload-clinic",
+        expires_in=timedelta(minutes=5),
+    )
+    monkeypatch.setattr(encounter_service, "is_confirmed_recording_allowed", lambda encounter: True)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        encounter = await client.post(
+            "/api/v1/encounters/",
+            json={"patient_id": "patient-upload-lock"},
+            headers=bearer(token),
+        )
+        assert encounter.status_code == status.HTTP_201_CREATED
+        request = {
+            "files": {"file": ("capture.m4a", b"audio-bytes", "audio/m4a")},
+            "params": {"encounter_id": encounter.json()["id"]},
+            "headers": {**bearer(token), "Idempotency-Key": "capture-immutable-123"},
+        }
+        first = await client.post("/api/v1/audio/upload", **request)
+        second = await client.post("/api/v1/audio/upload", **request)
+
+    assert first.status_code == status.HTTP_201_CREATED
+    assert second.status_code == status.HTTP_201_CREATED
+    assert second.json()["job"]["id"] == first.json()["job"]["id"]
+    assert second.json()["encounter_id"] == encounter.json()["id"]
+
+
 def test_mobile_websocket_accepts_bearer_and_preserves_tenant(mobile_signing_key) -> None:
     token = mobile_token(
         mobile_signing_key,
@@ -119,6 +152,86 @@ def test_mobile_websocket_accepts_bearer_and_preserves_tenant(mobile_signing_key
 
     assert final["job"]["tenant_id"] == "mobile-stream-clinic"
     assert final["encounter_id"]
+
+
+def test_mobile_websocket_keeps_audio_on_the_requested_confirmed_encounter(
+    mobile_signing_key, monkeypatch
+) -> None:
+    """A live client cannot silently receive a new encounter after it locks one."""
+    token = mobile_token(
+        mobile_signing_key,
+        subject="mobile-bound-stream-owner",
+        tenant="mobile-bound-stream-clinic",
+        expires_in=timedelta(minutes=5),
+    )
+    monkeypatch.setattr(encounter_service, "is_confirmed_recording_allowed", lambda encounter: True)
+    client = TestClient(app)
+    try:
+        encounter = client.post(
+            "/api/v1/encounters/",
+            json={"patient_id": "patient-locked-at-capture"},
+            headers=bearer(token),
+        )
+        assert encounter.status_code == status.HTTP_201_CREATED
+        encounter_id = encounter.json()["id"]
+        with client.websocket_connect(
+            f"/api/v1/audio/ws?encounter_id={encounter_id}",
+            headers=bearer(token),
+        ) as websocket:
+            websocket.send_bytes(b"encounter-bound-audio")
+            websocket.receive_json()
+            websocket.send_text("stop")
+            final = websocket.receive_json()
+    finally:
+        client.close()
+
+    assert final["encounter_id"] == encounter_id
+
+
+def test_mobile_websocket_retry_reuses_upload_idempotency_claim(
+    mobile_signing_key, monkeypatch
+) -> None:
+    token = mobile_token(
+        mobile_signing_key,
+        subject="mobile-live-retry-owner",
+        tenant="mobile-live-retry-clinic",
+        expires_in=timedelta(minutes=5),
+    )
+    monkeypatch.setattr(encounter_service, "is_confirmed_recording_allowed", lambda encounter: True)
+    client = TestClient(app)
+    try:
+        encounter = client.post(
+            "/api/v1/encounters/",
+            json={"patient_id": "patient-live-retry"},
+            headers=bearer(token),
+        )
+        assert encounter.status_code == status.HTTP_201_CREATED
+        encounter_id = encounter.json()["id"]
+        capture_id = "capture-live-retry-immutable-1"
+
+        with client.websocket_connect(
+            f"/api/v1/audio/ws?encounter_id={encounter_id}&capture_id={capture_id}",
+            headers=bearer(token),
+        ) as websocket:
+            websocket.send_bytes(b"live-retry-audio")
+            websocket.receive_json()
+            websocket.send_text("stop")
+            final = websocket.receive_json()
+
+        uploaded = client.post(
+            "/api/v1/audio/upload",
+            params={"encounter_id": encounter_id},
+            files={"file": ("retry.m4a", b"live-retry-audio", "audio/m4a")},
+            headers={**bearer(token), "Idempotency-Key": capture_id},
+        )
+    finally:
+        client.close()
+
+    assert final["capture_id"] == capture_id
+    assert final["encounter_id"] == encounter_id
+    assert uploaded.status_code == status.HTTP_201_CREATED
+    assert uploaded.json()["job"]["id"] == final["job"]["id"]
+    assert uploaded.json()["encounter_id"] == encounter_id
 
 
 def test_mobile_websocket_rejects_expired_bearer(mobile_signing_key) -> None:

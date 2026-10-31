@@ -18,10 +18,14 @@ from src.backend.services.nlp.emotion_classifier import emotion_classifier
 from src.backend.services.ehr.service import demo_fhir_exporter
 from src.backend.services.encounters.service import encounter_service
 from src.backend.services.audit.service import audit_service
-from src.backend.security import get_api_key, get_current_user, ensure_can_view_encounter
+from src.backend.security import get_api_key, get_current_user, ensure_can_edit_encounter, ensure_can_view_encounter
 from src.backend.domain.models.user import User, UserRole
 from src.backend.tenancy import tenant_dependency
 from src.backend.config import settings
+from src.backend.services.transcription.privacy import (
+    external_asr_consent_version,
+    require_external_asr_consent,
+)
 
 router = APIRouter(
     prefix="/transcriptions",
@@ -69,6 +73,14 @@ async def create_transcription(
         if encounter is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Encounter not found")
         ensure_can_view_encounter(current_user, encounter.clinician_id)
+        if external_asr_consent_version():
+            ensure_can_edit_encounter(current_user, encounter.clinician_id)
+            require_external_asr_consent(encounter)
+    elif external_asr_consent_version():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="External transcription requires a confirmed encounter and provider-specific consent",
+        )
     job = transcription_service.create_job(
         audio_url=str(request.audio_url),
         language_code=request.language_code,

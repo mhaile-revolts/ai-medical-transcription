@@ -8,14 +8,19 @@
     "userInterfaceStyle": "light",
     "ios": {
       "bundleIdentifier": "com.motorchain.aimedicaltranscription",
+      "buildNumber": "2",
       "supportsTablet": true,
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "Clinic Scribe accesses the microphone only after you confirm the patient, active visit, and recording consent."
+        "NSMicrophoneUsageDescription": "Clinic Scribe accesses the microphone only to record after you confirm the patient, active encounter, and recording consent."
       }
     },
     "android": {
-      "package": "com.motorchain.aimedicaltranscription"
+      "package": "com.motorchain.aimedicaltranscription",
+      "versionCode": 3,
+      "permissions": [
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {},
     "extra": {
@@ -26,7 +31,24 @@
     "plugins": [
       "expo-secure-store",
       "expo-status-bar",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Clinic Scribe to use the microphone only for a consented recording in the confirmed patient encounter.",
+          "recordAudioAndroid": true,
+          "enableBackgroundRecording": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "17.0"
+          }
+        }
+      ]
     ]
   }
 }

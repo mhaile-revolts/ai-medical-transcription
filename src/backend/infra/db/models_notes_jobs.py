@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import Boolean, DateTime, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, Float, String, Text, Uuid, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.backend.infra.db.models import Base
@@ -83,6 +83,7 @@ class TranscriptJobORM(Base):  # pragma: no cover - not wired yet
     status: Mapped[str] = mapped_column(String, nullable=False)
     audio_url: Mapped[str] = mapped_column(String, nullable=False)
     language_code: Mapped[str | None] = mapped_column(String, nullable=True)
+    language_probability: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_language: Mapped[str | None] = mapped_column(String, nullable=True)
     result_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     translated_text: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -99,6 +100,7 @@ class TranscriptJobORM(Base):  # pragma: no cover - not wired yet
             status=job.status.value,
             audio_url=str(job.audio_url),
             language_code=job.language_code,
+            language_probability=job.language_probability,
             target_language=job.target_language,
             result_text=job.result_text,
             translated_text=job.translated_text,
@@ -114,8 +116,32 @@ class TranscriptJobORM(Base):  # pragma: no cover - not wired yet
             status=TranscriptJobStatus(self.status),
             audio_url=self.audio_url,
             language_code=self.language_code,
+            language_probability=self.language_probability,
             target_language=self.target_language,
             result_text=self.result_text,
             translated_text=self.translated_text,
             tenant_id=self.tenant_id,
         )
+
+
+class AudioUploadIdempotencyORM(Base):
+    """Durable claim for a client capture, scoped to its immutable PHI context."""
+
+    __tablename__ = "audio_upload_idempotency"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "clinician_id", "encounter_id", "capture_id",
+            name="uq_audio_upload_idempotency_capture",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True)
+    tenant_id: Mapped[str] = mapped_column(String, nullable=False)
+    clinician_id: Mapped[str] = mapped_column(String, nullable=False)
+    encounter_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    capture_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    job_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

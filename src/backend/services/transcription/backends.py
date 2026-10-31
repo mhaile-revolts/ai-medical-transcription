@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+import base64
+import json
+import mimetypes
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Protocol
 
 from src.backend.config import settings
 from src.backend.core.multi_accent_asr_backend import MultiAccentASRBackend
+
+
+@dataclass(frozen=True)
+class ASRTranscription:
+    text: str
+    language_code: Optional[str] = None
+    language_probability: Optional[float] = None
 
 
 class ASRBackend(Protocol):
@@ -88,6 +101,77 @@ class WhisperASRBackend:
         # this might download from S3 or another object store first.
         result = self._model.transcribe(audio_url, language=language_code)
         return result.get("text", "")
+
+
+class ElevenLabsASRBackend:
+    """Clinical batch transcription through the connected ElevenLabs account.
+
+    Audio is sent through Replit's server-side connector proxy. The provider
+    key is never read by or returned to this application. Zero Retention Mode
+    is requested on every call; startup also fails closed unless the operator
+    confirms the required BAA and Zero Retention account configuration.
+    """
+
+    def __init__(self, model_id: str | None = None) -> None:
+        self._model_id = model_id or settings.elevenlabs_scribe_model
+        self._proxy_script = Path(__file__).with_name("elevenlabs_proxy.mjs")
+
+    def transcribe_with_metadata(
+        self,
+        audio_url: str,
+        language_code: Optional[str] = None,
+    ) -> ASRTranscription:
+        path = Path(audio_url)
+        if not path.is_file():
+            raise FileNotFoundError("Audio file is not available for transcription")
+
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        request = {
+            "file_name": path.name,
+            "content_type": content_type,
+            "audio_base64": base64.b64encode(path.read_bytes()).decode("ascii"),
+            "model_id": self._model_id,
+            "language_code": _elevenlabs_language_code(language_code),
+        }
+        try:
+            completed = subprocess.run(
+                ["node", str(self._proxy_script)],
+                input=json.dumps(request),
+                capture_output=True,
+                text=True,
+                timeout=180,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError("ElevenLabs transcription request could not be completed") from exc
+
+        try:
+            response = json.loads(completed.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("ElevenLabs connector returned an invalid response") from exc
+        if completed.returncode != 0 or response.get("error"):
+            raise RuntimeError(response.get("error") or "ElevenLabs transcription failed")
+
+        text = response.get("text")
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("ElevenLabs returned an empty transcript")
+        probability = response.get("language_probability")
+        return ASRTranscription(
+            text=text,
+            language_code=response.get("language_code") or None,
+            language_probability=probability if isinstance(probability, (int, float)) else None,
+        )
+
+    def transcribe(self, audio_url: str, language_code: Optional[str] = None) -> str:
+        return self.transcribe_with_metadata(audio_url, language_code).text
+
+
+def _elevenlabs_language_code(language_code: Optional[str]) -> Optional[str]:
+    """Convert common BCP-47 values (en-US) to the ISO language code Scribe expects."""
+    normalized = (language_code or "").strip()
+    if not normalized or normalized.lower() == "auto":
+        return None
+    return normalized.replace("_", "-").split("-", 1)[0].lower()
 
 
 class LlamaASRBackend:
@@ -178,6 +262,8 @@ def get_asr_backend_from_env() -> ASRBackend:
     backend_name = settings.asr_backend.lower()
     if backend_name == "whisper":
         return WhisperASRBackend()
+    if backend_name == "elevenlabs":
+        return ElevenLabsASRBackend()
     if backend_name == "llama":
         return LlamaASRBackend()
     if backend_name == "multi_accent":

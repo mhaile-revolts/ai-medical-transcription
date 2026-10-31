@@ -113,6 +113,7 @@ class SqlTranscriptionJobRepository(TranscriptionJobRepository):  # pragma: no c
                 existing.status = job.status.value
                 existing.audio_url = str(job.audio_url)
                 existing.language_code = job.language_code
+                existing.language_probability = job.language_probability
                 existing.target_language = job.target_language
                 existing.result_text = job.result_text
                 existing.translated_text = job.translated_text

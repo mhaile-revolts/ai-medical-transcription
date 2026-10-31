@@ -15,8 +15,9 @@ from src.backend.infra.db.sql_ehr import SqlEHRConnectionRepository, SqlEHRMessa
 from src.backend.services.users.service import user_service
 from src.backend.services.conversation.service import conversation_service
 from src.backend.infra.storage.audio import configure_postgres_audio_storage
+from src.backend.services.audio_upload_idempotency import audio_upload_idempotency_service
 
-REQUIRED_SCHEMA_REVISION = "0006_ehr_delivery_leases"
+REQUIRED_SCHEMA_REVISION = "0008_transcription_language_confidence"
 
 
 def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma: no cover - side-effectful wiring
@@ -44,7 +45,7 @@ def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma
     required_tables = {
         "encounters", "clinical_notes", "transcription_jobs", "users", "audio_blobs",
         "conversation_sessions", "ehr_connections", "ehr_messages", "smart_tokens",
-        "smart_authorization_states",
+        "smart_authorization_states", "audio_upload_idempotency",
     }
     missing_tables = required_tables - set(inspect(engine).get_table_names())
     if missing_tables:
@@ -73,3 +74,4 @@ def init_sql_repositories(database_url: Optional[str] = None) -> None:  # pragma
     user_service.configure_persistence(session_factory)
     conversation_service.configure_persistence(session_factory)
     configure_postgres_audio_storage(session_factory)
+    audio_upload_idempotency_service.configure_persistence(session_factory)

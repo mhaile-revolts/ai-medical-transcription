@@ -33,6 +33,15 @@ ehr_dispatch_task = None
 
 def _validate_security_configuration() -> None:
     """Reject insecure PHI deployment defaults before accepting requests."""
+    if settings.asr_backend.lower() == "elevenlabs":
+        if settings.require_on_prem_only:
+            raise RuntimeError("ASR_BACKEND=elevenlabs conflicts with REQUIRE_ON_PREM_ONLY=true")
+        if not settings.elevenlabs_baa_confirmed:
+            raise RuntimeError("ElevenLabs clinical transcription requires ELEVENLABS_BAA_CONFIRMED=true")
+        if not settings.elevenlabs_zero_retention_enabled:
+            raise RuntimeError(
+                "ElevenLabs clinical transcription requires ELEVENLABS_ZERO_RETENTION_ENABLED=true"
+            )
     if settings.app_env in {"development", "test"}:
         return
     failures = []

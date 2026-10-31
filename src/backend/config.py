@@ -30,6 +30,11 @@ class Settings:
 
     # ASR backend selection: "demo" (default) or "whisper".
     asr_backend: str = os.getenv("ASR_BACKEND", "demo")
+    elevenlabs_scribe_model: str = os.getenv("ELEVENLABS_SCRIBE_MODEL", "scribe_v2_medical")
+    elevenlabs_baa_confirmed: bool = os.getenv("ELEVENLABS_BAA_CONFIRMED", "false").lower() == "true"
+    elevenlabs_zero_retention_enabled: bool = (
+        os.getenv("ELEVENLABS_ZERO_RETENTION_ENABLED", "false").lower() == "true"
+    )
 
     # Optional MultiChain (private blockchain) integration used for tamper-evident
     # audit logging. When MULTICHAIN_ENABLED=true and the RPC connection details
@@ -45,9 +50,6 @@ class Settings:
     multichain_chain_name: Optional[str] = os.getenv("MULTICHAIN_CHAIN_NAME")
     multichain_audit_stream: str = os.getenv("MULTICHAIN_AUDIT_STREAM", "audit")
     multichain_rpc_timeout_seconds: float = float(os.getenv("MULTICHAIN_RPC_TIMEOUT_SECONDS", "2.0"))
-
-    # ASR backend selection: "demo" (default) or "whisper".
-    asr_backend: str = os.getenv("ASR_BACKEND", "demo")
 
     # Translation backend selection: "demo" (default) or "llm".
     translation_backend: str = os.getenv("TRANSLATION_BACKEND", "demo")

@@ -8,7 +8,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@clerk/react": "^6.15.1",
+    "@clerk/react": "^6.18.3",
     "@clerk/themes": "^2.4.57",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

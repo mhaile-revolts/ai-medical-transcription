@@ -40,6 +40,7 @@ class InMemoryTranscriptionService:
         audio_url: str,
         language_code: Optional[str] = None,
         target_language: Optional[str] = None,
+        job_id: Optional[UUID] = None,
     ) -> TranscriptJob:
         """Create and immediately process a transcription job synchronously.
 
@@ -50,6 +51,7 @@ class InMemoryTranscriptionService:
             audio_url=audio_url,
             language_code=language_code,
             target_language=target_language,
+            job_id=job_id,
         ).id
         return self._run_job(job_id)
 
@@ -59,6 +61,7 @@ class InMemoryTranscriptionService:
         audio_url: str,
         language_code: Optional[str] = None,
         target_language: Optional[str] = None,
+        job_id: Optional[UUID] = None,
     ) -> TranscriptJob:
         """Create a new transcription job but leave it in PENDING state.
 
@@ -66,7 +69,7 @@ class InMemoryTranscriptionService:
         ``process_job``.
         """
 
-        job_id = uuid4()
+        job_id = job_id or uuid4()
         job = TranscriptJob(
             id=job_id,
             created_at=datetime.now(timezone.utc),
@@ -101,9 +104,18 @@ class InMemoryTranscriptionService:
         try:
             from src.backend.infra.storage.audio import processing_path
             with processing_path(str(job.audio_url)) as audio_path:
-                base_text = self._asr_backend.transcribe(
-                    audio_url=audio_path, language_code=job.language_code,
-                )
+                transcribe_with_metadata = getattr(self._asr_backend, "transcribe_with_metadata", None)
+                if callable(transcribe_with_metadata):
+                    result = transcribe_with_metadata(
+                        audio_url=audio_path, language_code=job.language_code,
+                    )
+                    base_text = result.text
+                    job.language_code = result.language_code or job.language_code
+                    job.language_probability = result.language_probability
+                else:
+                    base_text = self._asr_backend.transcribe(
+                        audio_url=audio_path, language_code=job.language_code,
+                    )
             job.result_text = base_text
             job.translated_text = (
                 self._translation_backend.translate(text=base_text, target_language=job.target_language,

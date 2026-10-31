@@ -1,8 +1,16 @@
+# Node runtime is needed only for the server-side Replit connector SDK used by
+# the optional ElevenLabs ASR backend.
+FROM node:20-bookworm-slim AS node-runtime
+
 # Base Python image
 FROM python:3.11-slim
 
 # Set work directory
 WORKDIR /app
+
+# Replit's connector SDK is a zero-secret bridge to connected provider APIs.
+COPY --from=node-runtime /usr/local /usr/local
+RUN npm install --prefix /app --no-save --package-lock=false @replit/connectors-sdk
 
 # Environment settings
 ENV PYTHONDONTWRITEBYTECODE=1 \

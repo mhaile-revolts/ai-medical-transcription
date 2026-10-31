@@ -21,6 +21,7 @@ class TranscriptJob(BaseModel):
     status: TranscriptJobStatus
     audio_url: HttpUrl | str
     language_code: Optional[str] = None  # Source language (e.g., "en-US")
+    language_probability: Optional[float] = None  # ASR confidence for automatic language detection
     target_language: Optional[str] = None  # Desired translation target (e.g., "es-ES")
     result_text: Optional[str] = None  # Transcript in source language
     translated_text: Optional[str] = None  # Transcript translated to target_language, if requested
