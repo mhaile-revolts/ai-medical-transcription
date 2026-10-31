@@ -1,0 +1,30 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "tTtSFhAw4zB8VQOpxCYCN"
+uri = "file://generated-artifacts/Clinic-Scribe-Pilot-Overview.pdf"
+type = "pdf"
+title = "Clinic Scribe — Pilot Overview"
+description = "A client-facing, one-page overview of the Clinic Scribe workflow, capabilities, pilot setup, and readiness notes."
+logical_id = "36720f27-e946-4ce0-be91-9df9eaef154a"
+content_hash = "sha256:cc13378f6d5584555b0934e312226f71de2f20dbb6662f063958553bd52b411e"
+size = 68035
+mtime_ms = 1793444576750
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:83c6ee9a-0dc3-4b28-8b35-7b1e2cb96795/36720f27-e946-4ce0-be91-9df9eaef154a/0d78f742-a2ea-4f5a-8698-e0c7208a9ee1"
+storage_version_token = "1793444613897236"
+content_type = "application/pdf"
+
+[[outputs]]
+id = "Hfv5jJ4_8C1PyIuMTG5VY"
+uri = "file://docs/clinic-scribe-one-page.html"
+type = "html"
+title = "Clinic Scribe — Web Version"
+description = "A self-contained, printable HTML version of the one-page client handout."
+logical_id = "77ffd496-a89b-43cb-b1ba-43b8a547d4f9"
+content_hash = "sha256:eb5817873ab4a40e0a61e40995f0ff679444598f775077b41cbac81a5aac7eab"
+size = 12844
+mtime_ms = 1793444565578
+storage_uri = "gcs://replit-rams-assets-kirk/rams/assets/repl:83c6ee9a-0dc3-4b28-8b35-7b1e2cb96795/77ffd496-a89b-43cb-b1ba-43b8a547d4f9/43566060-b2b0-45a8-b79f-765c6a896696"
+storage_version_token = "1793444614475175"
+content_type = "text/html"

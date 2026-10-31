@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clinic Scribe | Pilot Overview</title>
+  <style>
+    :root {
+      --ink: #19343a;
+      --muted: #5f7779;
+      --teal: #147d78;
+      --deep: #0e5e5b;
+      --mint: #eaf5f0;
+      --line: #d9e8e3;
+      --paper: #fff;
+      --wash: #f2f7f4;
+      --gold: #bd8740;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: var(--wash);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .page {
+      width: 8.5in;
+      min-height: 11in;
+      margin: 24px auto;
+      padding: .48in .55in .4in;
+      background: var(--paper);
+      box-shadow: 0 16px 48px rgba(25, 52, 58, .12);
+      position: relative;
+      overflow: hidden;
+    }
+    .page::before {
+      content: "";
+      position: absolute;
+      top: -.9in;
+      right: -.75in;
+      width: 3in;
+      height: 3in;
+      border-radius: 50%;
+      background: #eaf5f0;
+      z-index: 0;
+    }
+    .content { position: relative; z-index: 1; }
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: .48in;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      color: white;
+      background: var(--teal);
+      font-weight: 800;
+      letter-spacing: -.06em;
+      font-size: 15px;
+    }
+    .brand-name { font-weight: 800; font-size: 17px; letter-spacing: -.04em; }
+    .brand-caption {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: .15em;
+      font-weight: 700;
+    }
+    .header-label {
+      padding: 9px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255,255,255,.8);
+      color: var(--deep);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      font-weight: 700;
+    }
+    .hero {
+      display: grid;
+      grid-template-columns: 1.42fr .78fr;
+      gap: 24px;
+      align-items: center;
+      margin-bottom: 26px;
+    }
+    .eyebrow {
+      margin: 0 0 12px;
+      color: var(--teal);
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: .16em;
+      font-weight: 800;
+    }
+    h1 {
+      max-width: 470px;
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.06;
+      letter-spacing: -.055em;
+    }
+    .hero-copy {
+      margin: 14px 0 0;
+      max-width: 450px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.65;
+    }
+    .hero-card {
+      padding: 19px 18px;
+      min-height: 160px;
+      border-radius: 18px;
+      color: #f2fbf8;
+      background: var(--deep);
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-card::after {
+      content: "";
+      position: absolute;
+      width: 130px;
+      height: 130px;
+      border: 1px solid rgba(226, 248, 240, .18);
+      border-radius: 50%;
+      right: -47px;
+      bottom: -56px;
+      box-shadow: 0 0 0 14px rgba(226,248,240,.04), 0 0 0 30px rgba(226,248,240,.035);
+    }
+    .hero-card-label {
+      color: #a8d5c9;
+      font-size: 8px;
+      text-transform: uppercase;
+      letter-spacing: .14em;
+      font-weight: 700;
+    }
+    .hero-card h2 {
+      margin: 12px 0 8px;
+      max-width: 180px;
+      font-size: 19px;
+      line-height: 1.15;
+      letter-spacing: -.035em;
+    }
+    .hero-card p {
+      margin: 0;
+      max-width: 190px;
+      color: #d1e8e0;
+      font-size: 10px;
+      line-height: 1.55;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin: 0 0 25px;
+    }
+    .step {
+      padding: 12px 13px;
+      background: #f5faf7;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
+    .step-number {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--teal);
+      font-size: 8px;
+      font-weight: 800;
+      letter-spacing: .12em;
+    }
+    .step strong { display: block; font-size: 10px; }
+    .step span:last-child {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 8px;
+      line-height: 1.45;
+    }
+    .section-heading {
+      display: flex;
+      justify-content: space-between;
+      align-items: end;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .section-heading h2 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: -.04em;
+    }
+    .section-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 9px;
+    }
+    .features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .feature {
+      padding: 14px 15px 13px;
+      min-height: 100px;
+      border: 1px solid var(--line);
+      border-radius: 13px;
+      background: white;
+    }
+    .feature-top {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 7px;
+    }
+    .feature-icon {
+      width: 23px;
+      height: 23px;
+      display: grid;
+      place-items: center;
+      flex: none;
+      border-radius: 7px;
+      color: var(--deep);
+      background: var(--mint);
+      font-size: 10px;
+      font-weight: 800;
+    }
+    .feature h3 { margin: 0; font-size: 10px; }
+    .feature p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 8.8px;
+      line-height: 1.55;
+    }
+    .pilot {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 19px;
+      padding: 17px 18px;
+      border-radius: 15px;
+      background: var(--mint);
+      margin-bottom: 15px;
+    }
+    .pilot h2 {
+      margin: 0 0 7px;
+      font-size: 13px;
+      letter-spacing: -.025em;
+    }
+    .pilot p {
+      margin: 0;
+      color: #4b6969;
+      font-size: 8.5px;
+      line-height: 1.55;
+    }
+    .pilot .pilot-note {
+      padding-left: 16px;
+      border-left: 1px solid #c5ded5;
+    }
+    .pilot .pilot-note strong {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--deep);
+      font-size: 9px;
+    }
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      align-items: end;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .footer-copy {
+      max-width: 495px;
+      color: #6b7f80;
+      font-size: 7.2px;
+      line-height: 1.5;
+    }
+    .footer-cta {
+      min-width: 135px;
+      color: var(--deep);
+      text-align: right;
+    }
+    .footer-cta strong {
+      display: block;
+      font-size: 8.5px;
+    }
+    .footer-cta span {
+      display: block;
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 7.5px;
+      line-height: 1.4;
+    }
+    @page { size: Letter; margin: 0; }
+    @media print {
+      html, body { width: 8.5in; height: 11in; background: white; }
+      .page {
+        width: 8.5in;
+        height: 11in;
+        min-height: 0;
+        margin: 0;
+        box-shadow: none;
+        page-break-after: avoid;
+      }
+    }
+    @media screen and (max-width: 700px) {
+      .page { width: 100%; min-height: 100vh; margin: 0; padding: 28px 22px; }
+      .hero { grid-template-columns: 1fr; }
+      .hero-card { min-height: 140px; }
+      .steps { grid-template-columns: 1fr; }
+      .features, .pilot { grid-template-columns: 1fr; }
+      .pilot .pilot-note { padding: 12px 0 0; border-left: 0; border-top: 1px solid #c5ded5; }
+      .footer { align-items: start; flex-direction: column; }
+      .footer-cta { text-align: left; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <div class="content">
+      <header class="header">
+        <div class="brand">
+          <div class="mark" aria-hidden="true">CS</div>
+          <div>
+            <div class="brand-name">Clinic Scribe</div>
+            <div class="brand-caption">Clinical documentation workflow</div>
+          </div>
+        </div>
+        <div class="header-label">Web + iOS + Android</div>
+      </header>
+
+      <section class="hero">
+        <div>
+          <p class="eyebrow">A practical starting point for clinic pilots</p>
+          <h1>Turn clinical conversations into reviewable visit notes.</h1>
+          <p class="hero-copy">
+            Clinic Scribe brings mobile audio capture, transcription, draft note
+            preparation, and web-based encounter review into one clinician-centered workflow.
+          </p>
+        </div>
+        <aside class="hero-card">
+          <div class="hero-card-label">Built around clinician oversight</div>
+          <h2>AI prepares the draft. Clinicians decide what’s final.</h2>
+          <p>Transcripts, notes, coding suggestions, and decision-support hints are reviewed by the care team.</p>
+        </aside>
+      </section>
+
+      <section class="steps" aria-label="Workflow">
+        <div class="step">
+          <span class="step-number">01 / CONFIRM</span>
+          <strong>Choose the patient and visit</strong>
+          <span>Confirm the active encounter and recording consent before capture.</span>
+        </div>
+        <div class="step">
+          <span class="step-number">02 / CAPTURE</span>
+          <strong>Record and prepare a transcript</strong>
+          <span>Use mobile upload or a live session; supported languages can be detected after transcription.</span>
+        </div>
+        <div class="step">
+          <span class="step-number">03 / REVIEW</span>
+          <strong>Review and finalize in the workspace</strong>
+          <span>Open encounter-linked transcript analysis and draft notes in the web portal.</span>
+        </div>
+      </section>
+
+      <section>
+        <div class="section-heading">
+          <h2>One workflow, connected across devices</h2>
+          <p>Designed for supervised clinic pilots</p>
+        </div>
+        <div class="features">
+          <article class="feature">
+            <div class="feature-top"><span class="feature-icon">01</span><h3>Encounter-bound mobile capture</h3></div>
+            <p>Recording stays locked until patient, active visit, and consent are confirmed. If an interruption occurs, the clinician can retry or discard retained audio.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-top"><span class="feature-icon">02</span><h3>Transcription and draft documentation</h3></div>
+            <p>Configurable ElevenLabs Scribe v2 Medical support, multilingual transcription, detected-language details, clinical entities, and SOAP-style draft notes.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-top"><span class="feature-icon">03</span><h3>Web encounter review</h3></div>
+            <p>Review visits, linked transcription jobs, analysis, and note status from a clinic workspace built for draft-to-final review.</p>
+          </article>
+          <article class="feature">
+            <div class="feature-top"><span class="feature-icon">04</span><h3>Recovery and human oversight</h3></div>
+            <p>Retry safeguards help keep a capture attached to its confirmed visit. Coding and decision-support outputs are advisory—not a substitute for clinical judgment.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="pilot">
+        <div>
+          <h2>Start with a pilot tailored to your workflow</h2>
+          <p>Map the visit flow, agree on the test environment and success criteria, then validate with clinicians using sandbox encounters before considering live clinical use.</p>
+        </div>
+        <div class="pilot-note">
+          <strong>EHR and provider setup are organization-specific</strong>
+          <p>OCHIN/Epic SMART on FHIR access requires an approved app registration and clinic configuration. Clinical-audio processing requires the organization to verify provider agreements and retention settings before any protected health information is used.</p>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <div class="footer-copy">
+          <strong>Pilot status and important limits:</strong> An Android preview checklist was reported complete on a Pixel 9a; iOS device validation remains pending. This overview is not a claim of HIPAA or other regulatory certification. Production use requires organization review of applicable agreements, privacy controls, EHR authorization, and device validation. AI-generated content requires clinician review.
+        </div>
+        <div class="footer-cta">
+          <strong>Let’s plan your pilot</strong>
+          <span>Workflow fit · sandbox access · validation plan</span>
+        </div>
+      </footer>
+    </div>
+  </main>
+</body>
+</html>
